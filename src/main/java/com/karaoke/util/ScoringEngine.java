@@ -2,9 +2,11 @@ package com.karaoke.util;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.karaoke.model.NoteEvent;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
@@ -18,201 +20,253 @@ public class ScoringEngine {
     }
     
     /**
-     * Calculate pitch accuracy score (0-100)
-     * Compares user's pitch contour with reference track
+     * Calculate pitch accuracy score using semitone deviations (0-100)
+     * Industry standard: measures how closely singer matches melody notes
      */
-    public double calculatePitchScore(List<Double> userPitches, List<Double> referencePitches) {
-        if (userPitches.isEmpty() || referencePitches.isEmpty()) {
+    public double calculatePitchScoreSemitones(List<NoteEvent> userNotes, List<NoteEvent> referenceNotes) {
+        if (userNotes.isEmpty() || referenceNotes.isEmpty()) {
             return 0.0;
         }
         
-        // Align sequences (take minimum length)
-        int minLength = Math.min(userPitches.size(), referencePitches.size());
+        // Align sequences using simple time-based matching
+        List<Double> semitoneDeviations = new ArrayList<>();
+        int perfectNotes = 0;
+        double toleranceSemitones = 0.5; // ±0.5 semitones = within tolerance
         
-        double totalDeviation = 0.0;
-        int correctNotes = 0;
-        double threshold = 50.0; // Hz tolerance for correct note
+        int minLength = Math.min(userNotes.size(), referenceNotes.size());
         
         for (int i = 0; i < minLength; i++) {
-            double userPitch = userPitches.get(i);
-            double refPitch = referencePitches.get(i);
+            NoteEvent userNote = userNotes.get(i);
+            NoteEvent refNote = referenceNotes.get(i);
             
-            double deviation = Math.abs(userPitch - refPitch);
-            totalDeviation += deviation;
+            double semitonesDiff = Math.abs(userNote.semitonesDifferenceFrom(refNote));
+            semitoneDeviations.add(semitonesDiff);
             
-            // Count notes within acceptable threshold
-            if (deviation <= threshold) {
-                correctNotes++;
+            if (semitonesDiff <= toleranceSemitones) {
+                perfectNotes++;
             }
         }
         
-        double averageDeviation = totalDeviation / minLength;
-        double accuracy = (double) correctNotes / minLength;
-        
-        // Score formula: 70% accuracy + 30% deviation penalty
-        // Lower deviation = better score
-        double deviationScore = Math.max(0, 30 - (averageDeviation / 10));
-        double accuracyScore = accuracy * 70;
-        double score = accuracyScore + deviationScore;
-        
-        return Math.min(100.0, Math.max(0.0, score));
-    }
-    
-    /**
-     * Calculate rhythm/timing score (0-100)
-     * Simplified for MVP - measures tempo consistency
-     */
-    public double calculateRhythmScore(List<Double> userPitches, List<Double> referencePitches) {
-        if (userPitches.isEmpty() || referencePitches.isEmpty()) {
-            return 0.0;
-        }
-        
-        // Calculate tempo consistency based on pitch sequence length alignment
-        int userLength = userPitches.size();
-        int refLength = referencePitches.size();
-        
-        double lengthRatio = (double) Math.min(userLength, refLength) 
-                           / Math.max(userLength, refLength);
-        
-        // Penalize timing offset
-        double timingScore = lengthRatio * 100;
-        
-        // Additional check: consistency of pitch changes (simplified rhythm)
-        double consistencyScore = calculatePitchChangeConsistency(userPitches, referencePitches);
-        
-        // Weighted combination
-        double score = (timingScore * 0.6) + (consistencyScore * 0.4);
-        
-        return Math.min(100.0, Math.max(0.0, score));
-    }
-    
-    /**
-     * Calculate voice quality score (0-100)
-     * Measures pitch stability and vocal control
-     */
-    public double calculateVoiceQualityScore(List<Double> userPitches) {
-        if (userPitches.isEmpty()) {
-            return 0.0;
-        }
-        
-        // Calculate pitch stability (lower variance = better quality)
-        double mean = userPitches.stream()
+        double avgDeviation = semitoneDeviations.stream()
             .mapToDouble(Double::doubleValue)
             .average()
             .orElse(0.0);
         
-        double variance = userPitches.stream()
-            .mapToDouble(p -> Math.pow(p - mean, 2))
+        // Score formula: 100 - (average semitone deviation * 20)
+        // 1 semitone off = -20 points, 2 semitones = -40 points, etc.
+        double rawScore = 100 - (avgDeviation * 20);
+        
+        // Boost for accuracy: add bonus for percentage of perfect notes
+        double accuracyBonus = ((double) perfectNotes / minLength) * 20;
+        
+        double finalScore = rawScore + accuracyBonus;
+        
+        return Math.min(100.0, Math.max(0.0, finalScore));
+    }
+
+    /**
+     * Calculate rhythm/timing score based on onset times (0-100)
+     * Measures if notes are hit on beat
+     */
+    public double calculateRhythmScoreOnsets(List<NoteEvent> userNotes, List<NoteEvent> referenceNotes) {
+        if (userNotes.isEmpty() || referenceNotes.isEmpty()) {
+            return 0.0;
+        }
+        
+        List<Double> timingOffsets = new ArrayList<>();
+        int onTimeNotes = 0;
+        int earlyNotes = 0;
+        int lateNotes = 0;
+        double toleranceMs = 100.0; // ±100ms tolerance
+        
+        int minLength = Math.min(userNotes.size(), referenceNotes.size());
+        
+        for (int i = 0; i < minLength; i++) {
+            NoteEvent userNote = userNotes.get(i);
+            NoteEvent refNote = referenceNotes.get(i);
+            
+            double offsetMs = userNote.timingOffsetMs(refNote);
+            timingOffsets.add(Math.abs(offsetMs));
+            
+            if (Math.abs(offsetMs) <= toleranceMs) {
+                onTimeNotes++;
+            } else if (offsetMs < 0) {
+                earlyNotes++;
+            } else {
+                lateNotes++;
+            }
+        }
+        
+        double avgOffsetMs = timingOffsets.stream()
+            .mapToDouble(Double::doubleValue)
             .average()
             .orElse(0.0);
         
-        double stdDev = Math.sqrt(variance);
+        // Score formula: 100 - (average offset / 10)
+        // 100ms off = -10 points, 500ms = -50 points
+        double timingScore = 100 - (avgOffsetMs / 10);
         
-        // Score based on stability (lower std dev = higher score)
-        // Typical good vocal has stdDev around 50-100 Hz
-        double stabilityScore = Math.max(0, 100 - (stdDev / 10));
+        // Bonus for on-time percentage
+        double onTimeBonus = ((double) onTimeNotes / minLength) * 30;
         
-        // Check for pitch jumps (smoothness)
-        double smoothnessScore = calculateSmoothness(userPitches);
+        double finalScore = (timingScore * 0.7) + onTimeBonus;
         
-        // Weighted combination
-        double score = (stabilityScore * 0.6) + (smoothnessScore * 0.4);
+        return Math.min(100.0, Math.max(0.0, finalScore));
+    }
+
+    /**
+     * Calculate voice similarity using MFCC comparison (0-100)
+     * Measures how similar the timbre/voice quality is to reference
+     */
+    public double calculateVoiceSimilarityMFCC(List<double[]> userMFCCs, List<double[]> refMFCCs) {
+        if (userMFCCs.isEmpty() || refMFCCs.isEmpty()) {
+            return 0.0;
+        }
+        
+        List<Double> similarities = new ArrayList<>();
+        int minLength = Math.min(userMFCCs.size(), refMFCCs.size());
+        
+        for (int i = 0; i < minLength; i++) {
+            double[] userVec = userMFCCs.get(i);
+            double[] refVec = refMFCCs.get(i);
+            
+            // Calculate cosine similarity between MFCC vectors
+            double similarity = cosineSimilarity(userVec, refVec);
+            similarities.add(similarity);
+        }
+        
+        double avgSimilarity = similarities.stream()
+            .mapToDouble(Double::doubleValue)
+            .average()
+            .orElse(0.0);
+        
+        // Convert similarity [-1, 1] to score [0, 100]
+        // Cosine similarity: 1 = identical, 0 = orthogonal, -1 = opposite
+        double score = ((avgSimilarity + 1) / 2) * 100;
         
         return Math.min(100.0, Math.max(0.0, score));
     }
-    
+
     /**
-     * Calculate overall score with weighted components
+     * Helper: Calculate cosine similarity between two vectors
      */
-    public double calculateOverallScore(double pitchScore, double rhythmScore, double voiceQualityScore) {
-        // Weights: Pitch 50%, Rhythm 30%, Voice Quality 20%
-        return (pitchScore * 0.5) + (rhythmScore * 0.3) + (voiceQualityScore * 0.2);
+    private double cosineSimilarity(double[] vecA, double[] vecB) {
+        if (vecA.length != vecB.length) {
+            return 0.0;
+        }
+        
+        double dotProduct = 0.0;
+        double normA = 0.0;
+        double normB = 0.0;
+        
+        for (int i = 0; i < vecA.length; i++) {
+            dotProduct += vecA[i] * vecB[i];
+            normA += vecA[i] * vecA[i];
+            normB += vecB[i] * vecB[i];
+        }
+        
+        if (normA == 0.0 || normB == 0.0) {
+            return 0.0;
+        }
+        
+        return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
     }
-    
+
     /**
-     * Generate detailed metrics as JSON string
+     * Generate enhanced detailed metrics with all scoring components
      */
-    public String generateDetailedMetrics(
-        List<Double> userPitches, 
-        List<Double> referencePitches,
+    public String generateEnhancedMetrics(
+        List<NoteEvent> userNotes,
+        List<NoteEvent> refNotes,
+        List<double[]> userMFCCs,
+        List<double[]> refMFCCs,
         double pitchScore,
-        double rhythmScore
+        double rhythmScore,
+        double voiceScore
     ) {
         try {
-            ObjectNode metrics = objectMapper.createObjectNode();
+            ObjectNode root = objectMapper.createObjectNode();
             
-            int minLength = Math.min(userPitches.size(), referencePitches.size());
-            int correctNotes = 0;
-            double totalDeviation = 0.0;
-            double threshold = 50.0;
+            // Pitch accuracy metrics
+            ObjectNode pitchMetrics = objectMapper.createObjectNode();
+            
+            int minLength = Math.min(userNotes.size(), refNotes.size());
+            int perfectNotes = 0;
+            double totalSemitones = 0.0;
+            double maxDeviation = 0.0;
             
             for (int i = 0; i < minLength; i++) {
-                double deviation = Math.abs(userPitches.get(i) - referencePitches.get(i));
-                totalDeviation += deviation;
-                if (deviation <= threshold) {
-                    correctNotes++;
-                }
+                double semitones = Math.abs(userNotes.get(i).semitonesDifferenceFrom(refNotes.get(i)));
+                totalSemitones += semitones;
+                maxDeviation = Math.max(maxDeviation, semitones);
+                if (semitones <= 0.5) perfectNotes++;
             }
             
-            double avgDeviation = minLength > 0 ? totalDeviation / minLength : 0.0;
+            pitchMetrics.put("averageSemitoneDeviation", Math.round(totalSemitones / minLength * 100.0) / 100.0);
+            pitchMetrics.put("notesHitCorrectly", perfectNotes);
+            pitchMetrics.put("totalNotes", minLength);
+            pitchMetrics.put("accuracyPercentage", Math.round((double) perfectNotes / minLength * 10000.0) / 100.0);
+            pitchMetrics.put("maxDeviation", Math.round(maxDeviation * 100.0) / 100.0);
+            pitchMetrics.put("perfectNotesCount", perfectNotes);
             
-            metrics.put("averagePitchDeviation", Math.round(avgDeviation * 100.0) / 100.0);
-            metrics.put("pitchAccuracyPercentage", Math.round(pitchScore * 100.0) / 100.0);
-            metrics.put("notesHitCorrectly", correctNotes);
-            metrics.put("totalNotes", minLength);
-            metrics.put("timingOffsetMs", Math.abs(userPitches.size() - referencePitches.size()) * 50);
-            metrics.put("userPitchCount", userPitches.size());
-            metrics.put("referencePitchCount", referencePitches.size());
+            root.set("pitchAccuracy", pitchMetrics);
             
-            return objectMapper.writeValueAsString(metrics);
+            // Rhythm timing metrics
+            ObjectNode rhythmMetrics = objectMapper.createObjectNode();
+            
+            int onTimeNotes = 0;
+            int earlyNotes = 0;
+            int lateNotes = 0;
+            double totalOffset = 0.0;
+            double maxOffset = 0.0;
+            
+            for (int i = 0; i < minLength; i++) {
+                double offset = userNotes.get(i).timingOffsetMs(refNotes.get(i));
+                double absOffset = Math.abs(offset);
+                totalOffset += absOffset;
+                maxOffset = Math.max(maxOffset, absOffset);
+                
+                if (absOffset <= 100) onTimeNotes++;
+                else if (offset < 0) earlyNotes++;
+                else lateNotes++;
+            }
+            
+            rhythmMetrics.put("averageTimingOffsetMs", Math.round(totalOffset / minLength * 100.0) / 100.0);
+            rhythmMetrics.put("onTimeNotesCount", onTimeNotes);
+            rhythmMetrics.put("earlyNotesCount", earlyNotes);
+            rhythmMetrics.put("lateNotesCount", lateNotes);
+            rhythmMetrics.put("maxTimingErrorMs", Math.round(maxOffset * 100.0) / 100.0);
+            
+            root.set("rhythmTiming", rhythmMetrics);
+            
+            // Voice similarity metrics
+            ObjectNode voiceMetrics = objectMapper.createObjectNode();
+            
+            int mfccLength = Math.min(userMFCCs.size(), refMFCCs.size());
+            double totalSimilarity = 0.0;
+            
+            for (int i = 0; i < mfccLength; i++) {
+                totalSimilarity += cosineSimilarity(userMFCCs.get(i), refMFCCs.get(i));
+            }
+            
+            double avgSimilarity = mfccLength > 0 ? totalSimilarity / mfccLength : 0.0;
+            double spectralDistance = 1.0 - ((avgSimilarity + 1) / 2);
+            
+            voiceMetrics.put("mfccSimilarityScore", Math.round(voiceScore * 100.0) / 100.0);
+            voiceMetrics.put("spectralDistance", Math.round(spectralDistance * 1000.0) / 1000.0);
+            voiceMetrics.put("timbreMatchPercentage", Math.round(voiceScore * 100.0) / 100.0);
+            
+            root.set("voiceSimilarity", voiceMetrics);
+            
+            // Overall score
+            double overallScore = (pitchScore * 0.5) + (rhythmScore * 0.3) + (voiceScore * 0.2);
+            root.put("overallScore", Math.round(overallScore * 100.0) / 100.0);
+            
+            return objectMapper.writeValueAsString(root);
             
         } catch (Exception e) {
-            log.error("Error generating detailed metrics", e);
+            log.error("Error generating enhanced metrics", e);
             return "{}";
         }
-    }
-    
-    // Helper methods
-    
-    private double calculatePitchChangeConsistency(List<Double> userPitches, List<Double> referencePitches) {
-        if (userPitches.size() < 2 || referencePitches.size() < 2) {
-            return 50.0; // Default middle score
-        }
-        
-        int matches = 0;
-        int comparisons = Math.min(userPitches.size() - 1, referencePitches.size() - 1);
-        
-        for (int i = 0; i < comparisons; i++) {
-            double userChange = userPitches.get(i + 1) - userPitches.get(i);
-            double refChange = referencePitches.get(i + 1) - referencePitches.get(i);
-            
-            // Check if changes are in same direction
-            if ((userChange > 0 && refChange > 0) || (userChange < 0 && refChange < 0) || 
-                (Math.abs(userChange) < 10 && Math.abs(refChange) < 10)) {
-                matches++;
-            }
-        }
-        
-        return comparisons > 0 ? (double) matches / comparisons * 100 : 50.0;
-    }
-    
-    private double calculateSmoothness(List<Double> pitches) {
-        if (pitches.size() < 2) {
-            return 100.0;
-        }
-        
-        double totalJump = 0.0;
-        for (int i = 0; i < pitches.size() - 1; i++) {
-            double jump = Math.abs(pitches.get(i + 1) - pitches.get(i));
-            totalJump += jump;
-        }
-        
-        double avgJump = totalJump / (pitches.size() - 1);
-        
-        // Smooth vocals have small jumps (< 50 Hz average)
-        // Large jumps indicate rough or unstable vocals
-        double smoothnessScore = Math.max(0, 100 - (avgJump / 5));
-        
-        return Math.min(100.0, smoothnessScore);
     }
 }
