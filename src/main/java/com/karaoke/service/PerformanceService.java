@@ -6,6 +6,7 @@ import com.karaoke.dto.PerformanceResponseDTO;
 import com.karaoke.dto.PerformanceScoreDTO;
 import com.karaoke.dto.PerformanceStatusDTO;
 import com.karaoke.exception.ResourceNotFoundException;
+import com.karaoke.model.NoteEvent;
 import com.karaoke.model.Performance;
 import com.karaoke.model.PerformanceScore;
 import com.karaoke.model.ProcessingStatus;
@@ -20,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
@@ -151,33 +153,46 @@ public class PerformanceService {
             performance.setProcessingMessage("Analyzing audio...");
             performanceRepository.save(performance);
             
-            // Extract pitch values from user recording
-            log.info("Extracting pitch values for performance {}", performanceId);
-            List<Double> userPitches = audioProcessor.extractPitchValues(performance.getAudioFilePath());
-            
-            performance.setProcessingProgress(40);
-            performance.setProcessingMessage("Comparing with reference...");
+            // Extract note events from user recording
+            log.info("Extracting note events for performance {}", performanceId);
+            List<NoteEvent> userNotes = audioProcessor.extractNoteEvents(performance.getAudioFilePath());
+
+            performance.setProcessingProgress(30);
+            performance.setProcessingMessage("Extracting voice features...");
             performanceRepository.save(performance);
-            
-            // Get reference pitch data
-            List<Double> referencePitches = objectMapper.readValue(
-                song.getReferencePitchData(),
-                new TypeReference<List<Double>>() {}
-            );
-            
+
+            // Extract MFCCs for voice similarity
+            List<double[]> userMFCCs = audioProcessor.extractMFCCs(performance.getAudioFilePath());
+
+            performance.setProcessingProgress(50);
+            performance.setProcessingMessage("Loading reference data...");
+            performanceRepository.save(performance);
+
+            // Get reference note events (need to parse from referencePitchData or process reference audio)
+            // For now, convert pitch data to note events
+            List<NoteEvent> referenceNotes = convertPitchDataToNoteEvents(song.getReferencePitchData());
+
             performance.setProcessingProgress(60);
+            performance.setProcessingMessage("Processing reference voice features...");
+            performanceRepository.save(performance);
+
+            // Get reference MFCCs (process reference audio if not cached)
+            List<double[]> referenceMFCCs = audioProcessor.extractMFCCs(song.getReferenceAudioPath());
+
+            performance.setProcessingProgress(70);
             performance.setProcessingMessage("Calculating scores...");
             performanceRepository.save(performance);
-            
-            // Calculate scores
-            double pitchScore = scoringEngine.calculatePitchScore(userPitches, referencePitches);
-            double rhythmScore = scoringEngine.calculateRhythmScore(userPitches, referencePitches);
-            double voiceQualityScore = scoringEngine.calculateVoiceQualityScore(userPitches);
-            double overallScore = scoringEngine.calculateOverallScore(pitchScore, rhythmScore, voiceQualityScore);
-            
+
+            // Calculate enhanced scores
+            double pitchScore = scoringEngine.calculatePitchScoreSemitones(userNotes, referenceNotes);
+            double rhythmScore = scoringEngine.calculateRhythmScoreOnsets(userNotes, referenceNotes);
+            double voiceQualityScore = scoringEngine.calculateVoiceSimilarityMFCC(userMFCCs, referenceMFCCs);
+            double overallScore = (pitchScore * 0.5) + (rhythmScore * 0.3) + (voiceQualityScore * 0.2);
+
             // Generate detailed metrics
-            String detailedMetrics = scoringEngine.generateDetailedMetrics(
-                userPitches, referencePitches, pitchScore, rhythmScore
+            String detailedMetrics = scoringEngine.generateEnhancedMetrics(
+                userNotes, referenceNotes, userMFCCs, referenceMFCCs, 
+                pitchScore, rhythmScore, voiceQualityScore
             );
             
             performance.setProcessingProgress(80);
@@ -198,7 +213,7 @@ public class PerformanceService {
             performance.setProcessingProgress(100);
             performance.setProcessingMessage("Processing completed successfully");
             performanceRepository.save(performance);
-            
+
             log.info("Completed processing performance {} with overall score: {}", 
                      performanceId, overallScore);
             
@@ -210,6 +225,34 @@ public class PerformanceService {
                 performance.setProcessingMessage("Processing failed: " + e.getMessage());
                 performanceRepository.save(performance);
             }
+        }
+    }
+
+    /**
+     * Convert legacy pitch data JSON to NoteEvent list
+     * Temporary solution until we update Song processing to store NoteEvents
+     */
+    private List<NoteEvent> convertPitchDataToNoteEvents(String pitchDataJson) {
+        try {
+            List<Double> pitches = objectMapper.readValue(
+                pitchDataJson,
+                new TypeReference<List<Double>>() {}
+            );
+            
+            List<NoteEvent> notes = new ArrayList<>();
+            double timeMs = 0;
+            double intervalMs = 100; // Assume 100ms between samples
+            
+            for (Double pitch : pitches) {
+                notes.add(new NoteEvent(timeMs, pitch, intervalMs, 0.5));
+                timeMs += intervalMs;
+            }
+            
+            return notes;
+            
+        } catch (Exception e) {
+            log.error("Error converting pitch data to note events", e);
+            return new ArrayList<>();
         }
     }
 }
