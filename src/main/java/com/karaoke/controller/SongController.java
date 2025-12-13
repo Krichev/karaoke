@@ -1,11 +1,9 @@
 package com.karaoke.controller;
 
 import com.karaoke.dto.SongDTO;
-import com.karaoke.dto.SongRequestDTO;
 import com.karaoke.dto.SongResponseDTO;
 import com.karaoke.model.Song;
 import com.karaoke.service.SongService;
-import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;

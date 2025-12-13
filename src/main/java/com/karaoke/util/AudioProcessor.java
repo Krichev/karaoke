@@ -7,6 +7,8 @@ import be.tarsos.dsp.pitch.PitchProcessor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import javax.sound.sampled.AudioInputStream;
+import javax.sound.sampled.AudioSystem;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
@@ -61,18 +63,12 @@ public class AudioProcessor {
      */
     public double getAudioDuration(String audioFilePath) {
         try {
-            File audioFile = new File(audioFilePath);
-            AudioDispatcher dispatcher = AudioDispatcherFactory.fromFile(audioFile, BUFFER_SIZE, OVERLAP);
-            
-            final double[] duration = {0.0};
-            dispatcher.addAudioProcessor((audioEvent) -> {
-                duration[0] = audioEvent.getTimeStamp();
-                return true;
-            });
-            
-            dispatcher.run();
-            return duration[0];
-            
+            AudioInputStream audioInputStream = AudioSystem.getAudioInputStream(new File(audioFilePath));
+            javax.sound.sampled.AudioFormat format = audioInputStream.getFormat();
+            long frames = audioInputStream.getFrameLength();
+            double durationInSeconds = (frames + 0.0) / format.getFrameRate();
+            audioInputStream.close();
+            return durationInSeconds;
         } catch (Exception e) {
             log.error("Error calculating audio duration for {}", audioFilePath, e);
             return 0.0;
