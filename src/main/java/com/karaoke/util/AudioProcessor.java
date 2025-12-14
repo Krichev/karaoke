@@ -138,4 +138,199 @@ public class AudioProcessor {
             return 0.0;
         }
     }
+
+
+    /**
+     * Extract note events with onset detection, pitch tracking, and duration estimation
+     * This provides richer data than raw pitch values for accurate scoring
+     */
+    public List<NoteEvent> extractNoteEvents(String audioFilePath) {
+        List<NoteEvent> noteEvents = new ArrayList<>();
+
+        try {
+            File audioFile = new File(audioFilePath);
+
+            // First pass: detect onsets (when notes start)
+            List<Double> onsetTimes = new ArrayList<>();
+            AudioDispatcher onsetDispatcher = AudioDispatcherFactory.fromFile(audioFile, BUFFER_SIZE, OVERLAP);
+
+            OnsetHandler onsetHandler = (time, salience) -> {
+                onsetTimes.add(time * 1000.0); // Convert seconds to milliseconds
+            };
+
+            // Use percussion onset detector with moderate sensitivity
+            PercussionOnsetDetector onsetDetector = new PercussionOnsetDetector(
+                    SAMPLE_RATE,
+                    BUFFER_SIZE,
+                    onsetHandler,
+                    20,  // Sensitivity threshold
+                    10   // Time threshold
+            );
+
+            onsetDispatcher.addAudioProcessor(onsetDetector);
+            onsetDispatcher.run();
+
+            log.info("Detected {} onsets in {}", onsetTimes.size(), audioFilePath);
+
+            // Second pass: extract pitch values with timestamps
+            List<PitchTimestamp> pitchData = new ArrayList<>();
+            AudioDispatcher pitchDispatcher = AudioDispatcherFactory.fromFile(audioFile, BUFFER_SIZE, OVERLAP);
+
+            PitchDetectionHandler pitchHandler = (result, audioEvent) -> {
+                if (result.getPitch() != -1) {
+                    double timeMs = audioEvent.getTimeStamp() * 1000.0;
+                    float pitch = result.getPitch();
+                    float probability = result.getProbability();
+                    pitchData.add(new PitchTimestamp(timeMs, pitch, probability));
+                }
+            };
+
+            PitchProcessor pitchProcessor = new PitchProcessor(
+                    PitchProcessor.PitchEstimationAlgorithm.YIN,
+                    SAMPLE_RATE,
+                    BUFFER_SIZE,
+                    pitchHandler
+            );
+
+            pitchDispatcher.addAudioProcessor(pitchProcessor);
+            pitchDispatcher.run();
+
+            log.info("Extracted {} pitch samples from {}", pitchData.size(), audioFilePath);
+
+            // Combine onsets and pitch data to create note events
+            if (onsetTimes.isEmpty() || pitchData.isEmpty()) {
+                log.warn("Insufficient data for note extraction: {} onsets, {} pitch samples",
+                        onsetTimes.size(), pitchData.size());
+                return noteEvents;
+            }
+
+            // Create note events by matching onsets with pitch data
+            for (int i = 0; i < onsetTimes.size(); i++) {
+                double onsetTime = onsetTimes.get(i);
+
+                // Find pitch values near this onset
+                List<PitchTimestamp> nearbyPitches = pitchData.stream()
+                        .filter(p -> Math.abs(p.timeMs - onsetTime) < 100) // Within 100ms
+                        .collect(java.util.stream.Collectors.toList());
+
+                if (!nearbyPitches.isEmpty()) {
+                    // Average pitch values for this note
+                    double avgPitch = nearbyPitches.stream()
+                            .mapToDouble(p -> p.pitch)
+                            .average()
+                            .orElse(0.0);
+
+                    double avgAmplitude = nearbyPitches.stream()
+                            .mapToDouble(p -> p.probability)
+                            .average()
+                            .orElse(0.0);
+
+                    // Estimate duration until next onset or end
+                    double duration;
+                    if (i < onsetTimes.size() - 1) {
+                        duration = onsetTimes.get(i + 1) - onsetTime;
+                    } else {
+                        // Last note - estimate from remaining pitch data
+                        duration = pitchData.get(pitchData.size() - 1).timeMs - onsetTime;
+                    }
+
+                    // Filter out very short notes (< 50ms) as they're likely noise
+                    if (duration >= 50 && avgPitch > 0) {
+                        noteEvents.add(new NoteEvent(onsetTime, avgPitch, duration, avgAmplitude));
+                    }
+                }
+            }
+
+            // If onset detection failed, fall back to pitch-only segmentation
+            if (noteEvents.isEmpty() && !pitchData.isEmpty()) {
+                log.info("Onset detection yielded no notes, falling back to pitch segmentation");
+                noteEvents = segmentPitchDataIntoNotes(pitchData);
+            }
+
+            log.info("Created {} note events from {}", noteEvents.size(), audioFilePath);
+
+        } catch (Exception e) {
+            log.error("Error extracting note events from {}", audioFilePath, e);
+            throw new RuntimeException("Failed to extract note events", e);
+        }
+
+        return noteEvents;
+    }
+
+    /**
+     * Fallback method: segment continuous pitch data into discrete notes
+     * Used when onset detection doesn't work well
+     */
+    private List<NoteEvent> segmentPitchDataIntoNotes(List<PitchTimestamp> pitchData) {
+        List<NoteEvent> notes = new ArrayList<>();
+
+        if (pitchData.isEmpty()) {
+            return notes;
+        }
+
+        double currentOnset = pitchData.get(0).timeMs;
+        double currentPitch = pitchData.get(0).pitch;
+        double currentAmplitude = pitchData.get(0).probability;
+        int sampleCount = 1;
+
+        double pitchChangeTolerance = 50.0; // Hz - significant pitch change threshold
+
+        for (int i = 1; i < pitchData.size(); i++) {
+            PitchTimestamp current = pitchData.get(i);
+
+            // Check if pitch changed significantly (new note)
+            if (Math.abs(current.pitch - currentPitch) > pitchChangeTolerance) {
+                // Create note from accumulated samples
+                double duration = current.timeMs - currentOnset;
+                if (duration >= 50) { // Minimum 50ms note duration
+                    notes.add(new NoteEvent(
+                            currentOnset,
+                            currentPitch,
+                            duration,
+                            currentAmplitude / sampleCount
+                    ));
+                }
+
+                // Start new note
+                currentOnset = current.timeMs;
+                currentPitch = current.pitch;
+                currentAmplitude = current.probability;
+                sampleCount = 1;
+            } else {
+                // Accumulate for current note
+                currentPitch = (currentPitch * sampleCount + current.pitch) / (sampleCount + 1);
+                currentAmplitude += current.probability;
+                sampleCount++;
+            }
+        }
+
+        // Add final note
+        PitchTimestamp last = pitchData.get(pitchData.size() - 1);
+        double duration = last.timeMs - currentOnset;
+        if (duration >= 50) {
+            notes.add(new NoteEvent(
+                    currentOnset,
+                    currentPitch,
+                    duration,
+                    currentAmplitude / sampleCount
+            ));
+        }
+
+        return notes;
+    }
+
+    /**
+     * Helper class to store pitch with timestamp
+     */
+    private static class PitchTimestamp {
+        double timeMs;
+        float pitch;
+        float probability;
+
+        PitchTimestamp(double timeMs, float pitch, float probability) {
+            this.timeMs = timeMs;
+            this.pitch = pitch;
+            this.probability = probability;
+        }
+    }
 }
