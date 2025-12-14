@@ -75,6 +75,13 @@
             <version>2.5</version>
         </dependency>
 
+        <!-- MP3 Decoder for audio processing -->
+        <dependency>
+            <groupId>javazoom</groupId>
+            <artifactId>jlayer</artifactId>
+            <version>1.0.1</version>
+        </dependency>
+
         <!-- Test Dependencies -->
         <dependency>
             <groupId>io.rest-assured</groupId>

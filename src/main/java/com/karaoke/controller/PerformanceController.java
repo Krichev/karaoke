@@ -42,7 +42,7 @@ public class PerformanceController {
             @PathVariable String songId,
             @Parameter(description = "User identifier", example = "user_12345")
             @RequestParam("userId") String userId,
-            @Parameter(description = "Audio recording file (MP3, WAV, etc.)")
+            @Parameter(description = "Audio recording file (MP3, WAV, AIFF, AU)")
             @RequestParam("audioFile") MultipartFile audioFile) {
         
         PerformanceResponseDTO response = performanceService.uploadPerformance(songId, userId, audioFile);

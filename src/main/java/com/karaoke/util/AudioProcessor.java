@@ -2,6 +2,7 @@ package com.karaoke.util;
 
 import be.tarsos.dsp.AudioDispatcher;
 import be.tarsos.dsp.AudioEvent;
+import be.tarsos.dsp.io.TarsosDSPAudioInputStream;
 import be.tarsos.dsp.io.jvm.AudioDispatcherFactory;
 import be.tarsos.dsp.mfcc.MFCC;
 import be.tarsos.dsp.onsets.OnsetHandler;
@@ -9,65 +10,150 @@ import be.tarsos.dsp.onsets.PercussionOnsetDetector;
 import be.tarsos.dsp.pitch.PitchDetectionHandler;
 import be.tarsos.dsp.pitch.PitchProcessor;
 import com.karaoke.model.NoteEvent;
+import javazoom.jl.decoder.Bitstream;
+import javazoom.jl.decoder.Decoder;
+import javazoom.jl.decoder.Header;
+import javazoom.jl.decoder.SampleBuffer;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioInputStream;
 import javax.sound.sampled.AudioSystem;
-import java.io.File;
+import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
 @Component
 public class AudioProcessor {
-    
+
     private static final int SAMPLE_RATE = 44100;
     private static final int BUFFER_SIZE = 2048;
     private static final int OVERLAP = 0;
-    
+
     /**
-     * Extract pitch values from audio file
+     * Check if file is MP3 format based on extension
+     */
+    private boolean isMP3File(String audioFilePath) {
+        return audioFilePath != null && audioFilePath.toLowerCase().endsWith(".mp3");
+    }
+
+    /**
+     * Decode MP3 file to AudioInputStream for TarsosDSP processing
+     * Uses JLayer to decode MP3 to PCM format in-memory
+     */
+    private AudioInputStream decodeMP3ToAudioStream(String mp3FilePath) throws Exception {
+        log.info("Decoding MP3 file: {}", mp3FilePath);
+
+        FileInputStream fileInputStream = new FileInputStream(mp3FilePath);
+        BufferedInputStream bufferedInputStream = new BufferedInputStream(fileInputStream);
+        Bitstream bitstream = new Bitstream(bufferedInputStream);
+        Decoder decoder = new Decoder();
+
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+
+        Header header;
+        int frameCount = 0;
+        AudioFormat audioFormat = null;
+
+        try {
+            while ((header = bitstream.readFrame()) != null) {
+                SampleBuffer sampleBuffer = (SampleBuffer) decoder.decodeFrame(header, bitstream);
+
+                // Set audio format from first frame
+                if (audioFormat == null) {
+                    audioFormat = new AudioFormat(
+                        sampleBuffer.getSampleFrequency(),
+                        16, // 16-bit samples
+                        sampleBuffer.getChannelCount(),
+                        true, // signed
+                        false // little-endian
+                    );
+                }
+
+                // Convert samples to bytes
+                short[] samples = sampleBuffer.getBuffer();
+                for (int i = 0; i < sampleBuffer.getBufferLength(); i++) {
+                    short sample = samples[i];
+                    outputStream.write(sample & 0xFF); // LSB
+                    outputStream.write((sample >> 8) & 0xFF); // MSB
+                }
+
+                bitstream.closeFrame();
+                frameCount++;
+            }
+
+            log.info("Decoded {} MP3 frames from {}", frameCount, mp3FilePath);
+
+            if (audioFormat == null) {
+                throw new RuntimeException("Failed to decode MP3: no valid frames found");
+            }
+
+            byte[] audioBytes = outputStream.toByteArray();
+            ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(audioBytes);
+
+            return new AudioInputStream(
+                byteArrayInputStream,
+                audioFormat,
+                audioBytes.length / audioFormat.getFrameSize()
+            );
+
+        } finally {
+            bitstream.close();
+            bufferedInputStream.close();
+            fileInputStream.close();
+        }
+    }
+
+    /**
+     * Extract pitch values from audio file (supports WAV, MP3, AIFF, AU)
      */
     public List<Double> extractPitchValues(String audioFilePath) {
         List<Double> pitchValues = new ArrayList<>();
-        
+
         try {
             File audioFile = new File(audioFilePath);
-            AudioDispatcher dispatcher = AudioDispatcherFactory.fromFile(audioFile, BUFFER_SIZE, OVERLAP);
-            
+            AudioDispatcher dispatcher;
+
+            // Handle MP3 files separately
+            if (isMP3File(audioFilePath)) {
+                AudioInputStream audioStream = decodeMP3ToAudioStream(audioFilePath);
+                TarsosDSPAudioInputStream tarsosStream = new UniversalAudioInputStream(audioStream);
+                dispatcher = new AudioDispatcher(tarsosStream, BUFFER_SIZE, OVERLAP);
+            } else {
+                dispatcher = AudioDispatcherFactory.fromFile(audioFile, BUFFER_SIZE, OVERLAP);
+            }
+
             PitchDetectionHandler pitchHandler = (result, audioEvent) -> {
                 if (result.getPitch() != -1) {
                     double pitch = result.getPitch();
                     pitchValues.add(pitch);
                 }
             };
-            
+
             PitchProcessor pitchProcessor = new PitchProcessor(
                 PitchProcessor.PitchEstimationAlgorithm.YIN,
                 SAMPLE_RATE,
                 BUFFER_SIZE,
                 pitchHandler
             );
-            
+
             dispatcher.addAudioProcessor(pitchProcessor);
             dispatcher.run();
-            
+
             log.info("Extracted {} pitch values from {}", pitchValues.size(), audioFilePath);
-            
+
         } catch (Exception e) {
             log.error("Error extracting pitch values from {}", audioFilePath, e);
             throw new RuntimeException("Failed to extract pitch values", e);
         }
-        
+
         return pitchValues;
     }
 
     /**
-     * Extract note events with onset times, pitch, and duration
-     */
-    /**
-     * Extract MFCC vectors from audio file.
+     * Extract MFCC vectors from audio file (supports WAV, MP3, AIFF, AU)
      * Returns a list where each element is a double[] containing the MFCC coefficients for one frame.
      */
     public List<double[]> extractMFCCs(String audioFilePath) {
@@ -75,12 +161,19 @@ public class AudioProcessor {
 
         try {
             File audioFile = new File(audioFilePath);
-
-            // Recommended settings for MFCC
             int bufferSize = 2048;
             int overlap = 1024; // 50% overlap is standard for MFCC
 
-            AudioDispatcher dispatcher = AudioDispatcherFactory.fromFile(audioFile, bufferSize, overlap);
+            AudioDispatcher dispatcher;
+
+            // Handle MP3 files separately
+            if (isMP3File(audioFilePath)) {
+                AudioInputStream audioStream = decodeMP3ToAudioStream(audioFilePath);
+                TarsosDSPAudioInputStream tarsosStream = new UniversalAudioInputStream(audioStream);
+                dispatcher = new AudioDispatcher(tarsosStream, bufferSize, overlap);
+            } else {
+                dispatcher = AudioDispatcherFactory.fromFile(audioFile, bufferSize, overlap);
+            }
 
             // 13 coefficients is standard, 40 mel filters, typical frequency range 300 Hz to ~half sample rate
             MFCC mfccProcessor = new MFCC(bufferSize, SAMPLE_RATE, 13, 40, 300, SAMPLE_RATE / 2.0f);
@@ -121,7 +214,7 @@ public class AudioProcessor {
 
         return mfccVectors;
     }
-    
+
     /**
      * Calculate audio duration in seconds
      */
@@ -152,7 +245,15 @@ public class AudioProcessor {
 
             // First pass: detect onsets (when notes start)
             List<Double> onsetTimes = new ArrayList<>();
-            AudioDispatcher onsetDispatcher = AudioDispatcherFactory.fromFile(audioFile, BUFFER_SIZE, OVERLAP);
+            AudioDispatcher onsetDispatcher;
+
+            if (isMP3File(audioFilePath)) {
+                AudioInputStream audioStream = decodeMP3ToAudioStream(audioFilePath);
+                TarsosDSPAudioInputStream tarsosStream = new UniversalAudioInputStream(audioStream);
+                onsetDispatcher = new AudioDispatcher(tarsosStream, BUFFER_SIZE, OVERLAP);
+            } else {
+                onsetDispatcher = AudioDispatcherFactory.fromFile(audioFile, BUFFER_SIZE, OVERLAP);
+            }
 
             OnsetHandler onsetHandler = (time, salience) -> {
                 onsetTimes.add(time * 1000.0); // Convert seconds to milliseconds
@@ -174,7 +275,15 @@ public class AudioProcessor {
 
             // Second pass: extract pitch values with timestamps
             List<PitchTimestamp> pitchData = new ArrayList<>();
-            AudioDispatcher pitchDispatcher = AudioDispatcherFactory.fromFile(audioFile, BUFFER_SIZE, OVERLAP);
+            AudioDispatcher pitchDispatcher;
+
+            if (isMP3File(audioFilePath)) {
+                AudioInputStream audioStream = decodeMP3ToAudioStream(audioFilePath);
+                TarsosDSPAudioInputStream tarsosStream = new UniversalAudioInputStream(audioStream);
+                pitchDispatcher = new AudioDispatcher(tarsosStream, BUFFER_SIZE, OVERLAP);
+            } else {
+                pitchDispatcher = AudioDispatcherFactory.fromFile(audioFile, BUFFER_SIZE, OVERLAP);
+            }
 
             PitchDetectionHandler pitchHandler = (result, audioEvent) -> {
                 if (result.getPitch() != -1) {

@@ -98,7 +98,7 @@ public class SongController {
         @RequestParam(value = "genre", required = false) String genre,
         @Parameter(description = "Difficulty level")
         @RequestParam("difficultyLevel") Song.DifficultyLevel difficultyLevel,
-        @Parameter(description = "Reference audio file (MP3, WAV, etc.)")
+        @Parameter(description = "Reference audio file (MP3, WAV, AIFF, AU)")
         @RequestParam("referenceAudio") MultipartFile referenceAudio
     ) {
         if (referenceAudio.isEmpty()) {
