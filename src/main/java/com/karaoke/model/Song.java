@@ -19,6 +19,9 @@ public class Song {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private String id;
+
+    @Column(nullable = false, unique = true, length = 36)
+    private String uuid;
     
     @Column(nullable = false, length = 200)
     private String title;

@@ -21,6 +21,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.UUID;
 
 @Slf4j
 @Service
@@ -91,19 +92,19 @@ public class SongService {
             song.setGenre(genre);
             song.setDifficultyLevel(difficultyLevel);
             song.setReferenceProcessingStatus(ProcessingStatus.PENDING);
-            
-            // Save initially to get ID
-            song = songRepository.save(song);
-            
-            // Store reference audio
-            String audioPath = fileStorageService.storeReferenceTrack(referenceAudio, song.getId());
+
+            // Generate UUID before first save for file storage
+            song.setUuid(java.util.UUID.randomUUID().toString());
+
+            // Store reference audio using the new UUID
+            String audioPath = fileStorageService.storeReferenceTrack(referenceAudio, song.getUuid());
             song.setReferenceAudioPath(audioPath);
             song = songRepository.save(song);
             
             // Process reference audio asynchronously
             processReferenceSong(song.getId());
             
-            log.info("Added new song: {} by {}", title, artist);
+            log.info("Added new song: {} by {} with UUID: {}", title, artist, song.getUuid());
             return song;
             
         } catch (Exception e) {
@@ -121,8 +122,7 @@ public class SongService {
         try {
             Song song = getSongById(songId);
             song.setReferenceProcessingStatus(ProcessingStatus.PROCESSING);
-            songRepository.save(song);
-            
+
             // Extract pitch data
             List<Double> pitchValues = audioProcessor.extractPitchValues(song.getReferenceAudioPath());
             String pitchDataJson = objectMapper.writeValueAsString(pitchValues);
