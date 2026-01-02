@@ -40,8 +40,8 @@ public class PerformanceController {
     public ResponseEntity<PerformanceResponseDTO> uploadPerformance(
             @Parameter(description = "Song ID to perform", example = "abc123-def456")
             @PathVariable String songId,
-            @Parameter(description = "User identifier", example = "user_12345")
-            @RequestParam("userId") String userId,
+            @Parameter(description = "User identifier", example = "123456")
+            @RequestParam("userId") Long userId,
             @Parameter(description = "Audio recording file (MP3, WAV, AIFF, AU)")
             @RequestParam("audioFile") MultipartFile audioFile) {
         

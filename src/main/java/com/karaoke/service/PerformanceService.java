@@ -57,7 +57,7 @@ public class PerformanceService {
     @Transactional
     public PerformanceResponseDTO uploadPerformance(
         String songId,
-        String userId,
+        Long userId,
         MultipartFile audioFile
     ) {
         try {

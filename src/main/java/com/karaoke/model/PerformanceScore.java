@@ -17,18 +17,18 @@ public class PerformanceScore {
     private String id;
     
     @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "performance_id", nullable = false)
+    @JoinColumn(name = "performance_id", nullable = false, unique = true)
     private Performance performance;
-    
-    @Column(nullable = false)
+
+    @Column(name = "pitch_score", nullable = false)
     private Double pitchScore;
-    
-    @Column(nullable = false)
+
+    @Column(name = "rhythm_score", nullable = false)
     private Double rhythmScore;
-    
-    @Column(nullable = false)
+
+    @Column(name = "voice_quality_score", nullable = false)
     private Double voiceQualityScore;
-    
-    @Column(columnDefinition = "TEXT")
+
+    @Column(name = "detailed_metrics", columnDefinition = "TEXT")
     private String detailedMetrics; // JSON string with detailed analysis
 }
