@@ -8,7 +8,6 @@ import com.karaoke.model.ProcessingStatus;
 import com.karaoke.model.Song;
 import com.karaoke.repository.SongRepository;
 import com.karaoke.util.AudioProcessor;
-import com.karaoke.util.FileStorageService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -28,18 +27,18 @@ import java.util.UUID;
 public class SongService {
     
     private final SongRepository songRepository;
-    private final FileStorageService fileStorageService;
+    private final AudioStorageService audioStorageService;
     private final AudioProcessor audioProcessor;
     private final ObjectMapper objectMapper;
-    
+
     public SongService(
         SongRepository songRepository,
-        FileStorageService fileStorageService,
+        AudioStorageService audioStorageService,
         AudioProcessor audioProcessor,
         ObjectMapper objectMapper
     ) {
         this.songRepository = songRepository;
-        this.fileStorageService = fileStorageService;
+        this.audioStorageService = audioStorageService;
         this.audioProcessor = audioProcessor;
         this.objectMapper = objectMapper;
     }
@@ -96,9 +95,9 @@ public class SongService {
             // Generate UUID before first save for file storage
             song.setUuid(java.util.UUID.randomUUID().toString());
 
-            // Store reference audio using the new UUID
-            String audioPath = fileStorageService.storeReferenceTrack(referenceAudio, song.getUuid());
-            song.setReferenceAudioPath(audioPath);
+            // Store reference audio using the new UUID (stores S3 key)
+            String s3Key = audioStorageService.storeReferenceTrack(referenceAudio, song.getUuid());
+            song.setReferenceAudioPath(s3Key);
             song = songRepository.save(song);
             
             // Process reference audio asynchronously
@@ -123,8 +122,11 @@ public class SongService {
             Song song = getSongById(songId);
             song.setReferenceProcessingStatus(ProcessingStatus.PROCESSING);
 
+            // Download audio from MinIO before processing
+            byte[] audioBytes = audioStorageService.downloadAudio(song.getReferenceAudioPath());
+
             // Extract pitch data
-            List<Double> pitchValues = audioProcessor.extractPitchValues(song.getReferenceAudioPath());
+            List<Double> pitchValues = audioProcessor.extractPitchValues(audioBytes);
             String pitchDataJson = objectMapper.writeValueAsString(pitchValues);
             
             // For MVP, rhythm data is simplified

@@ -442,4 +442,70 @@ public class AudioProcessor {
             this.probability = probability;
         }
     }
+
+    // ==================== OVERLOADED METHODS FOR BYTE[] INPUT ====================
+    // These methods support MinIO/S3 storage by accepting audio data as byte arrays
+
+    /**
+     * Extract pitch values from audio byte array
+     * Overloaded method for MinIO/S3 storage compatibility
+     */
+    public List<Double> extractPitchValues(byte[] audioBytes) {
+        try {
+            // Write bytes to temp file and process
+            File tempFile = File.createTempFile("audio_", ".wav");
+            tempFile.deleteOnExit();
+            try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+                fos.write(audioBytes);
+            }
+            List<Double> result = extractPitchValues(tempFile.getAbsolutePath());
+            tempFile.delete();
+            return result;
+        } catch (IOException e) {
+            log.error("Error processing audio bytes for pitch extraction", e);
+            throw new RuntimeException("Failed to extract pitch values from byte array", e);
+        }
+    }
+
+    /**
+     * Extract MFCCs from audio byte array
+     * Overloaded method for MinIO/S3 storage compatibility
+     */
+    public List<double[]> extractMFCCs(byte[] audioBytes) {
+        try {
+            // Write bytes to temp file and process
+            File tempFile = File.createTempFile("audio_", ".wav");
+            tempFile.deleteOnExit();
+            try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+                fos.write(audioBytes);
+            }
+            List<double[]> result = extractMFCCs(tempFile.getAbsolutePath());
+            tempFile.delete();
+            return result;
+        } catch (IOException e) {
+            log.error("Error processing audio bytes for MFCC extraction", e);
+            throw new RuntimeException("Failed to extract MFCCs from byte array", e);
+        }
+    }
+
+    /**
+     * Extract note events from audio byte array
+     * Overloaded method for MinIO/S3 storage compatibility
+     */
+    public List<NoteEvent> extractNoteEvents(byte[] audioBytes) {
+        try {
+            // Write bytes to temp file and process
+            File tempFile = File.createTempFile("audio_", ".wav");
+            tempFile.deleteOnExit();
+            try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+                fos.write(audioBytes);
+            }
+            List<NoteEvent> result = extractNoteEvents(tempFile.getAbsolutePath());
+            tempFile.delete();
+            return result;
+        } catch (IOException e) {
+            log.error("Error processing audio bytes for note event extraction", e);
+            throw new RuntimeException("Failed to extract note events from byte array", e);
+        }
+    }
 }

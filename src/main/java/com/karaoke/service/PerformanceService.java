@@ -13,7 +13,6 @@ import com.karaoke.model.ProcessingStatus;
 import com.karaoke.model.Song;
 import com.karaoke.repository.PerformanceRepository;
 import com.karaoke.util.AudioProcessor;
-import com.karaoke.util.FileStorageService;
 import com.karaoke.util.ScoringEngine;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -30,22 +29,22 @@ public class PerformanceService {
     
     private final PerformanceRepository performanceRepository;
     private final SongService songService;
-    private final FileStorageService fileStorageService;
+    private final AudioStorageService audioStorageService;
     private final AudioProcessor audioProcessor;
     private final ScoringEngine scoringEngine;
     private final ObjectMapper objectMapper;
-    
+
     public PerformanceService(
         PerformanceRepository performanceRepository,
         SongService songService,
-        FileStorageService fileStorageService,
+        AudioStorageService audioStorageService,
         AudioProcessor audioProcessor,
         ScoringEngine scoringEngine,
         ObjectMapper objectMapper
     ) {
         this.performanceRepository = performanceRepository;
         this.songService = songService;
-        this.fileStorageService = fileStorageService;
+        this.audioStorageService = audioStorageService;
         this.audioProcessor = audioProcessor;
         this.scoringEngine = scoringEngine;
         this.objectMapper = objectMapper;
@@ -79,9 +78,9 @@ public class PerformanceService {
             // Save to get ID
             performance = performanceRepository.save(performance);
             
-            // Store audio file
-            String audioPath = fileStorageService.storeRecording(audioFile, userId, songId);
-            performance.setAudioFilePath(audioPath);
+            // Store audio file (stores S3 key)
+            String s3Key = audioStorageService.storeRecording(audioFile, userId, songId);
+            performance.setAudioFilePath(s3Key);
             performance.setProcessingMessage("Queued for processing");
             performance = performanceRepository.save(performance);
             
@@ -153,16 +152,19 @@ public class PerformanceService {
             performance.setProcessingMessage("Analyzing audio...");
             performanceRepository.save(performance);
             
+            // Download user recording from MinIO
+            byte[] userAudioBytes = audioStorageService.downloadAudio(performance.getAudioFilePath());
+
             // Extract note events from user recording
             log.info("Extracting note events for performance {}", performanceId);
-            List<NoteEvent> userNotes = audioProcessor.extractNoteEvents(performance.getAudioFilePath());
+            List<NoteEvent> userNotes = audioProcessor.extractNoteEvents(userAudioBytes);
 
             performance.setProcessingProgress(30);
             performance.setProcessingMessage("Extracting voice features...");
             performanceRepository.save(performance);
 
             // Extract MFCCs for voice similarity
-            List<double[]> userMFCCs = audioProcessor.extractMFCCs(performance.getAudioFilePath());
+            List<double[]> userMFCCs = audioProcessor.extractMFCCs(userAudioBytes);
 
             performance.setProcessingProgress(50);
             performance.setProcessingMessage("Loading reference data...");
@@ -176,8 +178,9 @@ public class PerformanceService {
             performance.setProcessingMessage("Processing reference voice features...");
             performanceRepository.save(performance);
 
-            // Get reference MFCCs (process reference audio if not cached)
-            List<double[]> referenceMFCCs = audioProcessor.extractMFCCs(song.getReferenceAudioPath());
+            // Download reference audio from MinIO and extract MFCCs
+            byte[] referenceAudioBytes = audioStorageService.downloadAudio(song.getReferenceAudioPath());
+            List<double[]> referenceMFCCs = audioProcessor.extractMFCCs(referenceAudioBytes);
 
             performance.setProcessingProgress(70);
             performance.setProcessingMessage("Calculating scores...");
