@@ -8,6 +8,6 @@ import java.util.List;
 
 @Repository
 public interface PerformanceRepository extends JpaRepository<Performance, String> {
-    List<Performance> findByUserId(String userId);
+    List<Performance> findByUserId(Long userId);
     List<Performance> findBySongId(String songId);
 }

@@ -48,7 +48,7 @@ app:
       region: ${S3_REGION:us-east-1}
       access-key: ${S3_ACCESS_KEY:challenger_minio}
       secret-key: ${S3_SECRET_KEY:challenger_minio_secure_password_123}
-      endpoint: ${S3_ENDPOINT:http://localhost:9000}
+      endpoint: ${S3_ENDPOINT:http://45.129.186.166:9000}
     minio:
       presigned-url-duration: 60
 
