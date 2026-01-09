@@ -1,4 +1,22 @@
 spring:
+  datasource:
+    url: jdbc:postgresql://45.129.186.166:5432/karaoke_db?currentSchema=karaoke&sslmode=disable&socketTimeout=0&tcpKeepAlive=true
+    username: karaoke_user
+    password: karaoke_password_dev_123
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      data-source-properties:
+        tcpKeepAlive: true
+      minimum-idle: 1
+      maximum-pool-size: 20
+      connection-timeout: 20000
+      idle-timeout: 300000
+      max-lifetime: 1200000
+      leak-detection-threshold: 30000
+      keepalive-time: 300000
+      # Development optimizations
+      connection-init-sql: SELECT 1
+      auto-commit: false
   application:
     name: karaoke-rating-api
 
