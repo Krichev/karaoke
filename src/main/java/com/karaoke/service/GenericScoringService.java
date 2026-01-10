@@ -114,8 +114,8 @@ public class GenericScoringService {
         log.info("🔊 Scoring sound match");
 
         // Extract note events for pitch comparison
-        List<NoteEvent> userNotes = audioProcessor.extractNotes(request.getUserAudioPath());
-        List<NoteEvent> refNotes = audioProcessor.extractNotes(request.getReferenceAudioPath());
+        List<NoteEvent> userNotes = audioProcessor.extractNoteEvents(request.getUserAudioPath());
+        List<NoteEvent> refNotes = audioProcessor.extractNoteEvents(request.getReferenceAudioPath());
 
         // Extract MFCCs for timbre comparison
         List<double[]> userMFCCs = audioProcessor.extractMFCCs(request.getUserAudioPath());
@@ -146,8 +146,8 @@ public class GenericScoringService {
         log.info("🎤 Scoring singing performance");
 
         // Full karaoke scoring
-        List<NoteEvent> userNotes = audioProcessor.extractNotes(request.getUserAudioPath());
-        List<NoteEvent> refNotes = audioProcessor.extractNotes(request.getReferenceAudioPath());
+        List<NoteEvent> userNotes = audioProcessor.extractNoteEvents(request.getUserAudioPath());
+        List<NoteEvent> refNotes = audioProcessor.extractNoteEvents(request.getReferenceAudioPath());
         List<double[]> userMFCCs = audioProcessor.extractMFCCs(request.getUserAudioPath());
         List<double[]> refMFCCs = audioProcessor.extractMFCCs(request.getReferenceAudioPath());
 
