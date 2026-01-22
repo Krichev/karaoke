@@ -100,7 +100,7 @@ public class GenericScoringService {
                     refPattern,
                     userPattern.getOnsetTimesMs(),
                     150.0, // tolerance
-                    request.getMinimumScore());
+                    null);
 
             // Build detailed metrics JSON
             String metrics = buildRhythmMetrics(refPattern, userPattern, scoringResult);
