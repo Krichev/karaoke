@@ -1,7 +1,11 @@
 package com.karaoke.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.karaoke.dto.GenericScoringRequest;
 import com.karaoke.dto.GenericScoringResponse;
+import com.karaoke.dto.RhythmPatternDTO;
+import com.karaoke.dto.RhythmScoringResultDTO;
 import com.karaoke.model.NoteEvent;
 import com.karaoke.util.AudioProcessor;
 import com.karaoke.util.RhythmAnalyzer;
@@ -82,32 +86,76 @@ public class GenericScoringService {
     }
 
     private GenericScoringResponse scoreRhythmRepeat(GenericScoringRequest request) {
-        log.info("🎯 Scoring rhythm repeat");
+        log.info("🎯 Scoring rhythm repeat with enhanced pattern matching");
 
-        // Extract rhythm events from both audio files
-        List<Double> userOnsets = rhythmAnalyzer.extractOnsets(request.getUserAudioPath());
-        List<Double> refOnsets = rhythmAnalyzer.extractOnsets(request.getReferenceAudioPath());
+        try {
+            // Extract patterns from both audio files
+            RhythmPatternDTO refPattern = rhythmAnalyzer.extractRhythmPattern(
+                    request.getReferenceAudioPath(), -40.0, 100.0);
+            RhythmPatternDTO userPattern = rhythmAnalyzer.extractRhythmPattern(
+                    request.getUserAudioPath(), -40.0, 100.0);
 
-        // Compare rhythm patterns
-        double rhythmScore = rhythmAnalyzer.compareRhythms(userOnsets, refOnsets);
+            // Score using the new pattern-based algorithm
+            RhythmScoringResultDTO scoringResult = rhythmAnalyzer.scoreRhythmPattern(
+                    refPattern,
+                    userPattern.getOnsetTimesMs(),
+                    150.0, // tolerance
+                    request.getMinimumScore());
 
-        // Also check amplitude/intensity matching
-        double intensityScore = rhythmAnalyzer.compareIntensity(
-                request.getUserAudioPath(), request.getReferenceAudioPath());
+            // Build detailed metrics JSON
+            String metrics = buildRhythmMetrics(refPattern, userPattern, scoringResult);
 
-        // 90% rhythm accuracy, 10% intensity matching
-        double overallScore = (rhythmScore * 0.9) + (intensityScore * 0.1);
+            return GenericScoringResponse.builder()
+                    .pitchScore(0.0)
+                    .rhythmScore(scoringResult.getOverallScore())
+                    .voiceScore(0.0)
+                    .overallScore(scoringResult.getOverallScore())
+                    .detailedMetrics(metrics)
+                    .build();
 
-        String metrics = rhythmAnalyzer.generateComparisonMetrics(
-                userOnsets, refOnsets, rhythmScore, intensityScore);
+        } catch (Exception e) {
+            log.error("❌ Error in rhythm scoring: {}", e.getMessage(), e);
+            return GenericScoringResponse.builder()
+                    .pitchScore(0.0)
+                    .rhythmScore(0.0)
+                    .voiceScore(0.0)
+                    .overallScore(0.0)
+                    .detailedMetrics("{\"error\": \"" + e.getMessage() + "\"}")
+                    .build();
+        }
+    }
 
-        return GenericScoringResponse.builder()
-                .pitchScore(0.0)
-                .rhythmScore(overallScore)
-                .voiceScore(intensityScore)
-                .overallScore(overallScore)
-                .detailedMetrics(metrics)
-                .build();
+    private String buildRhythmMetrics(RhythmPatternDTO ref, RhythmPatternDTO user, RhythmScoringResultDTO result) {
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            ObjectNode root = mapper.createObjectNode();
+
+            // Reference pattern info
+            ObjectNode refInfo = root.putObject("referencePattern");
+            refInfo.put("totalBeats", ref.getTotalBeats());
+            refInfo.put("estimatedBpm", ref.getEstimatedBpm());
+            refInfo.put("timeSignature", ref.getTimeSignature());
+
+            // User pattern info
+            ObjectNode userInfo = root.putObject("userPattern");
+            userInfo.put("totalBeats", user.getTotalBeats());
+            userInfo.put("estimatedBpm", user.getEstimatedBpm());
+
+            // Scoring details
+            ObjectNode scoring = root.putObject("scoring");
+            scoring.put("overallScore", result.getOverallScore());
+            scoring.put("perfectBeats", result.getPerfectBeats());
+            scoring.put("goodBeats", result.getGoodBeats());
+            scoring.put("missedBeats", result.getMissedBeats());
+            scoring.put("averageErrorMs", result.getAverageErrorMs());
+            scoring.put("maxErrorMs", result.getMaxErrorMs());
+            scoring.put("consistencyScore", result.getConsistencyScore());
+            scoring.put("feedback", result.getFeedback());
+
+            return mapper.writeValueAsString(root);
+        } catch (Exception e) {
+            return "{}";
+        }
     }
 
     private GenericScoringResponse scoreSoundMatch(GenericScoringRequest request) {
