@@ -11,7 +11,18 @@ import java.io.InputStream;
 public interface AudioStorageService {
 
     /**
-     * Store a performance recording
+     * Store a performance recording with full context (NEW - preferred method)
+     * @param file the audio file
+     * @param userId the user who uploaded the file
+     * @param songId the song UUID
+     * @param performanceId the performance UUID
+     * @return S3 key or file path
+     */
+    String storeRecording(MultipartFile file, Long userId, String songId, String performanceId);
+    
+    /**
+     * Store a performance recording (LEGACY - for backward compatibility)
+     * Generates a temporary performance ID internally
      * @param file the audio file
      * @param userId the user who uploaded the file
      * @param songId the song ID
@@ -29,6 +40,7 @@ public interface AudioStorageService {
 
     /**
      * Download audio file as byte array
+     * Automatically resolves bucket from key prefix
      * @param s3Key the S3 key or file path
      * @return audio file bytes
      */
@@ -36,6 +48,7 @@ public interface AudioStorageService {
 
     /**
      * Get audio file as input stream
+     * Automatically resolves bucket from key prefix
      * @param s3Key the S3 key or file path
      * @return input stream
      */
@@ -43,6 +56,7 @@ public interface AudioStorageService {
 
     /**
      * Generate presigned URL for temporary access
+     * Automatically resolves bucket from key prefix
      * @param s3Key the S3 key
      * @return presigned URL (or null for local storage)
      */
@@ -50,14 +64,23 @@ public interface AudioStorageService {
 
     /**
      * Delete audio file
+     * Automatically resolves bucket from key prefix
      * @param s3Key the S3 key or file path
      */
     void deleteAudio(String s3Key);
 
     /**
      * Check if audio file exists
+     * Automatically resolves bucket from key prefix
      * @param s3Key the S3 key or file path
      * @return true if exists
      */
     boolean audioExists(String s3Key);
+    
+    /**
+     * NEW: Determine bucket name from S3 key structure
+     * @param s3Key the stored S3 key
+     * @return bucket name
+     */
+    String resolveBucketFromKey(String s3Key);
 }

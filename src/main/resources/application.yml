@@ -61,12 +61,16 @@ karaoke:
 app:
   storage:
     type: ${STORAGE_TYPE:s3}
+    environment: ${STORAGE_ENV:dev}
     s3:
       bucket-name: ${S3_BUCKET_NAME:karaoke-app}
       region: ${S3_REGION:us-east-1}
       access-key: ${S3_ACCESS_KEY:challenger_minio}
       secret-key: ${S3_SECRET_KEY:challenger_minio_secure_password_123}
       endpoint: ${S3_ENDPOINT:http://45.129.186.166:9000}
+      buckets:
+        recordings: ${S3_BUCKET_RECORDINGS:karaoke-recordings}
+        reference-tracks: ${S3_BUCKET_REFERENCE:karaoke-reference-tracks}
     minio:
       presigned-url-duration: 60
 

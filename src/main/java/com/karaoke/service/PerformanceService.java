@@ -78,8 +78,14 @@ public class PerformanceService {
             // Save to get ID
             performance = performanceRepository.save(performance);
             
-            // Store audio file (stores S3 key)
-            String s3Key = audioStorageService.storeRecording(audioFile, userId, songId);
+            // Store audio file (stores S3 key) with hierarchical key including performance ID
+            String s3Key = audioStorageService.storeRecording(
+                audioFile, 
+                userId, 
+                songId, 
+                performance.getId()
+            );
+            
             performance.setAudioFilePath(s3Key);
             performance.setProcessingMessage("Queued for processing");
             performance = performanceRepository.save(performance);
