@@ -1,13 +1,13 @@
 # Production Profile Configuration
 spring:
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/karaoke_db}
-    username: ${DATABASE_USERNAME:karaoke_user}
+    url: ${DATABASE_URL}
+    username: ${DATABASE_USERNAME}
     password: ${DATABASE_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
-      minimum-idle: 5
-      maximum-pool-size: 20
+      minimum-idle: 2
+      maximum-pool-size: 10
       connection-timeout: 30000
       idle-timeout: 600000
       max-lifetime: 1800000
@@ -34,11 +34,12 @@ spring:
     locations: classpath:db/migration
     schemas: karaoke
     validate-on-migrate: true
-    clean-disabled: true  # NEVER allow clean in production
+    clean-disabled: true
     default-schema: karaoke
 
 logging:
   level:
+    root: WARN
     com.karaoke: INFO
     org.hibernate.SQL: WARN
     org.flywaydb: INFO

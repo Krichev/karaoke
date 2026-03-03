@@ -1,0 +1,262 @@
+name: Karaoke Backend CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - main
+      - develop
+
+env:
+  JAVA_VERSION: '17'
+  DOCKER_IMAGE_NAME: karaoke-backend
+  REGISTRY: ghcr.io
+
+jobs:
+  # ====================
+  # BUILD & TEST
+  # ====================
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Grant execute permission for mvnw
+        run: chmod +x mvnw
+
+      - name: Build with Maven
+        run: ./mvnw clean package -DskipTests
+
+      - name: Run tests
+        run: ./mvnw test
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: target/surefire-reports/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-jar
+          path: target/*.jar
+          retention-days: 1
+
+  # ====================
+  # DOCKER BUILD & PUSH
+  # ====================
+  docker:
+    name: Build Docker Image
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+      environment: ${{ steps.set-env.outputs.environment }}
+      image_name: ${{ steps.set-env.outputs.image_name }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: app-jar
+          path: target/
+
+      - name: Determine environment
+        id: set-env
+        run: |
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "owner_lc=${OWNER_LC}" >> $GITHUB_OUTPUT
+          
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "environment=prod" >> $GITHUB_OUTPUT
+            echo "Building for PRODUCTION"
+          else
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "Building for DEVELOPMENT"
+          fi
+          
+          echo "image_name=ghcr.io/${OWNER_LC}/${{ env.DOCKER_IMAGE_NAME }}" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.set-env.outputs.image_name }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=raw,value=${{ steps.set-env.outputs.environment }}-latest
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            JAR_FILE=target/*.jar
+
+  # ====================
+  # DEPLOY TO VPS
+  # ====================
+  deploy:
+    name: Deploy to VPS
+    needs: docker
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/heads/feature/'))
+
+    environment:
+      name: ${{ needs.docker.outputs.environment }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set deployment variables
+        id: vars
+        run: |
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          
+          ENV="${{ needs.docker.outputs.environment }}"
+          if [[ "$ENV" == "prod" ]]; then
+            echo "port=8084" >> $GITHUB_OUTPUT
+            echo "compose_file=docker-compose.prod.yml" >> $GITHUB_OUTPUT
+          else
+            echo "port=8083" >> $GITHUB_OUTPUT
+            echo "compose_file=docker-compose.dev.yml" >> $GITHUB_OUTPUT
+          fi
+          echo "deploy_path=/opt/challenger/$ENV/karaoke-backend" >> $GITHUB_OUTPUT
+          echo "image_tag=ghcr.io/${OWNER_LC}/${{ env.DOCKER_IMAGE_NAME }}:${ENV}-latest" >> $GITHUB_OUTPUT
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Copy deployment files
+        run: |
+          for file in infrastructure/docker/${{ steps.vars.outputs.compose_file }} infrastructure/scripts/deploy.sh; do
+            if [ ! -f "$file" ]; then
+              echo "ERROR: $file not found!"
+              exit 1
+            fi
+          done
+
+          ssh -i ~/.ssh/deploy_key ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "mkdir -p ${{ steps.vars.outputs.deploy_path }}"
+
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
+            infrastructure/docker/${{ steps.vars.outputs.compose_file }} \
+            infrastructure/scripts/deploy.sh \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ steps.vars.outputs.deploy_path }}/
+
+      - name: Deploy to VPS
+        env:
+          ENVIRONMENT: ${{ needs.docker.outputs.environment }}
+          IMAGE_TAG: ${{ steps.vars.outputs.image_tag }}
+          DATABASE_URL: ${{ needs.docker.outputs.environment == 'prod' && secrets.KARAOKE_DATABASE_URL_PROD || secrets.KARAOKE_DATABASE_URL_DEV }}
+          DATABASE_PASSWORD: ${{ needs.docker.outputs.environment == 'prod' && secrets.KARAOKE_DATABASE_PASSWORD_PROD || secrets.KARAOKE_DATABASE_PASSWORD_DEV }}
+          DATABASE_USERNAME: ${{ secrets.KARAOKE_DATABASE_USERNAME }}
+          MINIO_ENDPOINT: ${{ secrets.MINIO_ENDPOINT }}
+          MINIO_ACCESS_KEY: ${{ secrets.MINIO_ACCESS_KEY }}
+          MINIO_SECRET_KEY: ${{ secrets.MINIO_SECRET_KEY }}
+          SPRING_PROFILES_ACTIVE: ${{ needs.docker.outputs.environment == 'prod' && 'prod' || 'dev' }}
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+            set -e
+            cd ${{ steps.vars.outputs.deploy_path }}
+          
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          
+            docker pull ${{ steps.vars.outputs.image_tag }}
+          
+            cat > .env << 'ENVEOF'
+          ENVIRONMENT=${{ env.ENVIRONMENT }}
+          IMAGE_TAG=${{ steps.vars.outputs.image_tag }}
+          DATABASE_URL=${{ env.DATABASE_URL }}
+          DATABASE_USERNAME=${{ env.DATABASE_USERNAME }}
+          DATABASE_PASSWORD=${{ env.DATABASE_PASSWORD }}
+          S3_ENDPOINT=${{ env.MINIO_ENDPOINT }}
+          S3_ACCESS_KEY=${{ env.MINIO_ACCESS_KEY }}
+          S3_SECRET_KEY=${{ env.MINIO_SECRET_KEY }}
+          S3_BUCKET_NAME=karaoke-app
+          SPRING_PROFILES_ACTIVE=${{ env.SPRING_PROFILES_ACTIVE }}
+          SERVER_PORT=8080
+          ENVEOF
+
+            chmod 600 .env
+          
+            docker compose -f ${{ steps.vars.outputs.compose_file }} down --remove-orphans || true
+            docker compose -f ${{ steps.vars.outputs.compose_file }} up -d
+          
+            docker image prune -af --filter "until=24h"
+          ENDSSH
+
+      - name: Health check
+        run: |
+          echo "Waiting for service to be healthy..."
+          sleep 30
+
+          HEALTH_URL="http://${{ secrets.VPS_HOST }}:${{ steps.vars.outputs.port }}/actuator/health"
+          echo "Health check URL: $HEALTH_URL"
+
+          for i in {1..10}; do
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" $HEALTH_URL || echo "000")
+            if [[ "$HTTP_STATUS" == "200" ]]; then
+              echo "✅ Service is healthy!"
+              exit 0
+            fi
+            echo "Attempt $i: HTTP $HTTP_STATUS - waiting..."
+            sleep 10
+          done
+
+          echo "❌ Health check failed!"
+          exit 1
+
+      - name: Deployment notification
+        if: always()
+        run: |
+          if [[ "${{ job.status }}" == "success" ]]; then
+            echo "✅ Deployment successful to ${{ needs.docker.outputs.environment }}"
+          else
+            echo "❌ Deployment failed to ${{ needs.docker.outputs.environment }}"
+          fi
