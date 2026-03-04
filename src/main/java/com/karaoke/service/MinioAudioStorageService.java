@@ -55,7 +55,7 @@ public class MinioAudioStorageService implements AudioStorageService {
     );
 
     @Override
-    public String storeRecording(MultipartFile file, Long userId, String songId) {
+    public String storeRecording(MultipartFile file, Long userId, String songId, String performanceId) {
         try {
             validateAudioFile(file);
 
@@ -77,13 +77,20 @@ public class MinioAudioStorageService implements AudioStorageService {
             // Upload to MinIO
             uploadToMinio(bucket, s3Key, file.getBytes(), file.getContentType());
 
-            log.info("Stored recording: {} for user {} and song {} in bucket {}", s3Key, userId, songId, bucket);
+            log.info("Stored recording: {} for user {} and song {} (performance: {}) in bucket {}", 
+                     s3Key, userId, songId, performanceId, bucket);
             return s3Key;
 
         } catch (IOException e) {
-            log.error("Failed to store recording for user {} and song {}", userId, songId, e);
+            log.error("Failed to store recording for user {} and song {} (performance: {})", 
+                      userId, songId, performanceId, e);
             throw new AudioStorageException("Failed to store recording", e);
         }
+    }
+
+    @Override
+    public String storeRecording(MultipartFile file, Long userId, String songId) {
+        return storeRecording(file, userId, songId, null);
     }
 
     @Override
@@ -118,7 +125,7 @@ public class MinioAudioStorageService implements AudioStorageService {
 
     @Override
     public byte[] downloadAudio(String s3Key) {
-        String bucket = determineBucket(s3Key);
+        String bucket = resolveBucketFromKey(s3Key);
         
         try {
             GetObjectRequest getRequest = GetObjectRequest.builder()
@@ -140,7 +147,7 @@ public class MinioAudioStorageService implements AudioStorageService {
 
     @Override
     public InputStream getAudioStream(String s3Key) {
-        String bucket = determineBucket(s3Key);
+        String bucket = resolveBucketFromKey(s3Key);
         
         try {
             GetObjectRequest getRequest = GetObjectRequest.builder()
@@ -165,7 +172,7 @@ public class MinioAudioStorageService implements AudioStorageService {
                 return null;
             }
             
-            String bucket = determineBucket(s3Key);
+            String bucket = resolveBucketFromKey(s3Key);
 
             GetObjectRequest getRequest = GetObjectRequest.builder()
                     .bucket(bucket)
@@ -190,12 +197,9 @@ public class MinioAudioStorageService implements AudioStorageService {
     @Override
     public void deleteAudio(String s3Key) {
         try {
-            // Try deleting from determined bucket, or both if unsure
-            String bucket = determineBucket(s3Key);
+            // Try deleting from determined bucket
+            String bucket = resolveBucketFromKey(s3Key);
             deleteFromBucket(bucket, s3Key);
-            
-            // If it looked like a new key but might be old (edge case), or vice versa,
-            // we could double delete, but keeping it simple for now.
             
             log.info("Deleted audio from MinIO: {}", s3Key);
 
@@ -207,16 +211,27 @@ public class MinioAudioStorageService implements AudioStorageService {
 
     @Override
     public boolean audioExists(String s3Key) {
-        String bucket = determineBucket(s3Key);
+        String bucket = resolveBucketFromKey(s3Key);
         return fileExistsInBucket(bucket, s3Key);
     }
     
-    // Determine bucket based on key format heuristic
-    private String determineBucket(String s3Key) {
-        String env = storageProperties.getEnvironment().getPathValue();
-        if (s3Key.startsWith(env + "/")) {
-            return bucketResolver.getBucket(MediaType.AUDIO);
+    @Override
+    public String resolveBucketFromKey(String s3Key) {
+        if (s3Key == null || s3Key.trim().isEmpty()) {
+            log.debug("Null or empty S3 key provided, returning legacy bucket: {}", legacyBucketName);
+            return legacyBucketName;
         }
+
+        // TODO: Long-term, consider adopting the Challenger module's pattern (BucketResolver + DB lookup)
+        // if karaoke adopts more sophisticated multi-bucket storage management.
+        String envPath = storageProperties.getEnvironment().getPathValue();
+        if (s3Key.startsWith(envPath + "/")) {
+            String bucket = bucketResolver.getBucket(MediaType.AUDIO);
+            log.debug("Resolved bucket '{}' for key '{}' based on environment prefix '{}'", bucket, s3Key, envPath);
+            return bucket;
+        }
+
+        log.debug("Key '{}' does not match environment prefix '{}', returning legacy bucket: {}", s3Key, envPath, legacyBucketName);
         return legacyBucketName;
     }
     
