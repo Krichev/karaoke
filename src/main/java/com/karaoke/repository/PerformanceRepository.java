@@ -7,7 +7,7 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 
 @Repository
-public interface PerformanceRepository extends JpaRepository<Performance, String> {
+public interface PerformanceRepository extends JpaRepository<Performance, Long> {
     List<Performance> findByUserId(Long userId);
-    List<Performance> findBySongId(String songId);
+    List<Performance> findBySongId(Long songId);
 }

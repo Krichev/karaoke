@@ -71,8 +71,8 @@ public class SongController {
     })
     @GetMapping("/{id}")
     public ResponseEntity<SongDTO> getSongById(
-        @Parameter(description = "Unique song identifier", example = "abc123-def456")
-        @PathVariable String id
+        @Parameter(description = "Unique song identifier", example = "1")
+        @PathVariable Long id
     ) {
         Song song = songService.getSongById(id);
         return ResponseEntity.ok(SongDTO.fromEntity(song));

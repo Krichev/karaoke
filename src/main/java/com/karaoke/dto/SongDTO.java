@@ -11,8 +11,8 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @Schema(description = "Song information data transfer object")
 public class SongDTO {
-    @Schema(description = "Unique song identifier", example = "abc123-def456")
-    private String id;
+    @Schema(description = "Unique song identifier", example = "1")
+    private Long id;
     
     @Schema(description = "Song title", example = "Bohemian Rhapsody")
     private String title;

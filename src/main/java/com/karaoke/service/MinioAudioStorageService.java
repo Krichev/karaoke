@@ -55,7 +55,7 @@ public class MinioAudioStorageService implements AudioStorageService {
     );
 
     @Override
-    public String storeRecording(MultipartFile file, Long userId, String songId, String performanceId) {
+    public String storeRecording(MultipartFile file, Long userId, Long songId, Long performanceId) {
         try {
             validateAudioFile(file);
 
@@ -89,7 +89,7 @@ public class MinioAudioStorageService implements AudioStorageService {
     }
 
     @Override
-    public String storeRecording(MultipartFile file, Long userId, String songId) {
+    public String storeRecording(MultipartFile file, Long userId, Long songId) {
         return storeRecording(file, userId, songId, null);
     }
 

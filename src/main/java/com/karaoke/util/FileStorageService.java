@@ -40,8 +40,8 @@ public class FileStorageService {
     /**
      * Store user recording
      */
-    public String storeRecording(MultipartFile file, Long userId, String songId) throws IOException {
-        String filename = String.format("%d_%s_%s_%s",
+    public String storeRecording(MultipartFile file, Long userId, Long songId) throws IOException {
+        String filename = String.format("%d_%d_%s_%s",
             userId,
             songId,
             UUID.randomUUID().toString(),

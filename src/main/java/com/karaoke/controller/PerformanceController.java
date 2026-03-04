@@ -38,8 +38,8 @@ public class PerformanceController {
     })
     @PostMapping("/songs/{songId}/performances")
     public ResponseEntity<PerformanceResponseDTO> uploadPerformance(
-            @Parameter(description = "Song ID to perform", example = "abc123-def456")
-            @PathVariable String songId,
+            @Parameter(description = "Song ID to perform", example = "1")
+            @PathVariable Long songId,
             @Parameter(description = "User identifier", example = "123456")
             @RequestParam("userId") Long userId,
             @Parameter(description = "Audio recording file (MP3, WAV, AIFF, AU)")
@@ -59,8 +59,8 @@ public class PerformanceController {
     })
     @GetMapping("/performances/{performanceId}/status")
     public ResponseEntity<PerformanceStatusDTO> getPerformanceStatus(
-            @Parameter(description = "Performance ID", example = "perf_xyz789")
-            @PathVariable String performanceId) {
+            @Parameter(description = "Performance ID", example = "1")
+            @PathVariable Long performanceId) {
         PerformanceStatusDTO status = performanceService.getPerformanceStatus(performanceId);
         return ResponseEntity.ok(status);
     }
@@ -76,8 +76,8 @@ public class PerformanceController {
     })
     @GetMapping("/performances/{performanceId}/scores")
     public ResponseEntity<PerformanceScoreDTO> getPerformanceScores(
-            @Parameter(description = "Performance ID", example = "perf_xyz789")
-            @PathVariable String performanceId) {
+            @Parameter(description = "Performance ID", example = "1")
+            @PathVariable Long performanceId) {
         PerformanceScoreDTO scores = performanceService.getPerformanceScores(performanceId);
         return ResponseEntity.ok(scores);
     }

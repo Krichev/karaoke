@@ -5,7 +5,7 @@ spring:
   datasource:
     url: ${DATABASE_URL:jdbc:postgresql://45.129.186.166:5432/karaoke_db?currentSchema=karaoke&sslmode=disable&socketTimeout=0&tcpKeepAlive=true}
     username: ${DATABASE_USERNAME:karaoke_user}
-    password: ${DATABASE_PASSWORD:karaoke_password_dev_123}
+    password: ${DATABASE_PASSWORD:karaoke_password_secure_123}
     driver-class-name: org.postgresql.Driver
     hikari:
       data-source-properties:

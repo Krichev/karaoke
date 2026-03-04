@@ -18,7 +18,7 @@ public interface AudioStorageService {
      * @param performanceId the performance UUID
      * @return S3 key or file path
      */
-    String storeRecording(MultipartFile file, Long userId, String songId, String performanceId);
+    String storeRecording(MultipartFile file, Long userId, Long songId, Long performanceId);
     
     /**
      * Store a performance recording (LEGACY - for backward compatibility)
@@ -28,7 +28,7 @@ public interface AudioStorageService {
      * @param songId the song ID
      * @return S3 key or file path
      */
-    String storeRecording(MultipartFile file, Long userId, String songId);
+    String storeRecording(MultipartFile file, Long userId, Long songId);
 
     /**
      * Store a reference track

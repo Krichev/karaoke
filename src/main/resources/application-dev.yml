@@ -3,7 +3,7 @@ spring:
   datasource:
     url: jdbc:postgresql://45.129.186.166:5432/karaoke_db?currentSchema=karaoke&sslmode=disable&socketTimeout=0&tcpKeepAlive=true
     username: karaoke_user
-    password: karaoke_password_dev_123
+    password: karaoke_password_secure_123
     driver-class-name: org.postgresql.Driver
     hikari:
       data-source-properties:

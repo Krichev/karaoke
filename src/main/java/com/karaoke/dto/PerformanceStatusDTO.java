@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @NoArgsConstructor
 public class PerformanceStatusDTO {
-    private String performanceId;
+    private Long performanceId;
     private String status;
     private Integer progress;
     private String message;

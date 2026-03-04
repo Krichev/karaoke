@@ -15,8 +15,8 @@ import java.util.Map;
 @NoArgsConstructor
 @Schema(description = "Detailed performance scoring results")
 public class PerformanceScoreDTO {
-    @Schema(description = "Performance identifier", example = "perf_xyz789")
-    private String performanceId;
+    @Schema(description = "Performance identifier", example = "1")
+    private Long performanceId;
     
     @Schema(description = "Song title", example = "Bohemian Rhapsody")
     private String songTitle;

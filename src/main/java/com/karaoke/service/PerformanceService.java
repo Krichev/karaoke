@@ -55,7 +55,7 @@ public class PerformanceService {
      */
     @Transactional
     public PerformanceResponseDTO uploadPerformance(
-        String songId,
+        Long songId,
         Long userId,
         MultipartFile audioFile
     ) {
@@ -111,7 +111,7 @@ public class PerformanceService {
     /**
      * Get performance status
      */
-    public PerformanceStatusDTO getPerformanceStatus(String performanceId) {
+    public PerformanceStatusDTO getPerformanceStatus(Long performanceId) {
         Performance performance = performanceRepository.findById(performanceId)
             .orElseThrow(() -> new ResourceNotFoundException("Performance not found: " + performanceId));
         
@@ -121,7 +121,7 @@ public class PerformanceService {
     /**
      * Get performance scores
      */
-    public PerformanceScoreDTO getPerformanceScores(String performanceId) {
+    public PerformanceScoreDTO getPerformanceScores(Long performanceId) {
         try {
             Performance performance = performanceRepository.findById(performanceId)
                 .orElseThrow(() -> new ResourceNotFoundException("Performance not found: " + performanceId));
@@ -143,7 +143,7 @@ public class PerformanceService {
      */
     @Async("audioProcessingExecutor")
     @Transactional
-    public void processPerformance(String performanceId) {
+    public void processPerformance(Long performanceId) {
         Performance performance = null;
         
         try {

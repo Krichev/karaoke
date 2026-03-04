@@ -13,8 +13,8 @@ import lombok.AllArgsConstructor;
 public class PerformanceScore {
     
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    private String id;
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
     
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "performance_id", nullable = false, unique = true)

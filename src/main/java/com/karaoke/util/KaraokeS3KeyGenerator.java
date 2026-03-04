@@ -17,14 +17,14 @@ public class KaraokeS3KeyGenerator {
      * Example: prod/3a/user/48291/song/abc-123/perf/def-456/8f3c9d2e.wav
      */
     public String generateRecordingKey(StorageEnvironment env, Long userId, 
-                                       String songId, String performanceId, String extension) {
+                                       Long songId, Long performanceId, String extension) {
         validateInputs(userId, songId, performanceId);
         
         String hashPrefix = computeHashPrefix(userId);
         String uuid = UUID.randomUUID().toString();
         String ext = normalizeExtension(extension);
         
-        return String.format("%s/%s/user/%d/song/%s/perf/%s/%s.%s",
+        return String.format("%s/%s/user/%d/song/%d/perf/%d/%s.%s",
             env.getPathValue(),
             hashPrefix,
             userId,
@@ -64,8 +64,8 @@ public class KaraokeS3KeyGenerator {
         return String.format("%02x", Math.abs(uuid.hashCode()) % 256);
     }
     
-    private void validateInputs(Long userId, String songId, String performanceId) {
-        if (userId == null || !StringUtils.hasText(songId) || !StringUtils.hasText(performanceId)) {
+    private void validateInputs(Long userId, Long songId, Long performanceId) {
+        if (userId == null || songId == null || performanceId == null) {
             throw new IllegalArgumentException("UserId, songId, and performanceId are required");
         }
     }

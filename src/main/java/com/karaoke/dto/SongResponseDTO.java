@@ -8,7 +8,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @NoArgsConstructor
 public class SongResponseDTO {
-    private String id;
+    private Long id;
     private String title;
     private String artist;
     private String message;

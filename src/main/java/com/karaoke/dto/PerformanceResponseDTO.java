@@ -8,7 +8,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @NoArgsConstructor
 public class PerformanceResponseDTO {
-    private String performanceId;
+    private Long performanceId;
     private String status;
     private String message;
 }

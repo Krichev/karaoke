@@ -54,7 +54,7 @@ public class SongService {
     /**
      * Get song by ID
      */
-    public Song getSongById(String songId) {
+    public Song getSongById(Long songId) {
         return songRepository.findById(songId)
             .orElseThrow(() -> new ResourceNotFoundException("Song not found: " + songId));
     }
@@ -117,7 +117,7 @@ public class SongService {
      */
     @Async("audioProcessingExecutor")
     @Transactional
-    public void processReferenceSong(String songId) {
+    public void processReferenceSong(Long songId) {
         try {
             Song song = getSongById(songId);
             song.setReferenceProcessingStatus(ProcessingStatus.PROCESSING);

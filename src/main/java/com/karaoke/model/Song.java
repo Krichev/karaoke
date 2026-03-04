@@ -19,8 +19,8 @@ import java.time.LocalDateTime;
 public class Song {
     
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    private String id;
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
 
     @Column(nullable = false, unique = true, length = 36)
     private String uuid;
