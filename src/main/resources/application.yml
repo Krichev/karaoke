@@ -22,6 +22,9 @@ spring:
       auto-commit: false
   application:
     name: karaoke-rating-api
+  web:
+    resources:
+      add-mappings: false
 
   profiles:
     active: dev  # Change to 'prod' for production
