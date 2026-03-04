@@ -12,6 +12,8 @@ import org.springframework.stereotype.Component;
 
 import javax.sound.sampled.*;
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -23,6 +25,87 @@ public class RhythmAnalyzer {
 
     private final ObjectMapper objectMapper;
     private final SoundAnalyzer soundAnalyzer;
+
+    /**
+     * Extract onset times (beat/hit times) from audio byte array.
+     * Overloaded method for URL/MinIO download compatibility.
+     */
+    public List<Double> extractOnsets(byte[] audioBytes) {
+        if (audioBytes == null || audioBytes.length == 0) {
+            return new ArrayList<>();
+        }
+        try {
+            File tempFile = File.createTempFile("rhythm_", ".wav");
+            tempFile.deleteOnExit();
+            try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+                fos.write(audioBytes);
+            }
+            List<Double> result = extractOnsets(tempFile.getAbsolutePath());
+            if (!tempFile.delete()) {
+                log.warn("Failed to delete temporary file: {}", tempFile.getAbsolutePath());
+            }
+            return result;
+        } catch (IOException e) {
+            log.error("Error processing audio bytes for onset extraction", e);
+            throw new RuntimeException("Failed to extract onsets from byte array", e);
+        }
+    }
+
+    /**
+     * Compare intensity/amplitude patterns from audio byte arrays.
+     */
+    public double compareIntensity(byte[] userAudio, byte[] refAudio) {
+        if (userAudio == null || refAudio == null) {
+            return 0.0;
+        }
+        try {
+            File userFile = File.createTempFile("intensity_user_", ".wav");
+            File refFile = File.createTempFile("intensity_ref_", ".wav");
+            userFile.deleteOnExit();
+            refFile.deleteOnExit();
+
+            try (FileOutputStream fos = new FileOutputStream(userFile)) {
+                fos.write(userAudio);
+            }
+            try (FileOutputStream fos = new FileOutputStream(refFile)) {
+                fos.write(refAudio);
+            }
+
+            double result = compareIntensity(userFile.getAbsolutePath(), refFile.getAbsolutePath());
+
+            if (!userFile.delete()) log.warn("Failed to delete user temp file");
+            if (!refFile.delete()) log.warn("Failed to delete ref temp file");
+            
+            return result;
+        } catch (IOException e) {
+            log.error("Error comparing intensity from byte arrays", e);
+            return 0.0;
+        }
+    }
+
+    /**
+     * Extract rhythm pattern from audio byte array.
+     */
+    public RhythmPatternDTO extractRhythmPattern(byte[] audioBytes, Double silenceThresholdDb, Double minOnsetIntervalMs) {
+        if (audioBytes == null || audioBytes.length == 0) {
+            return RhythmPatternDTO.builder().version(1).onsetTimesMs(List.of()).totalBeats(0).build();
+        }
+        try {
+            File tempFile = File.createTempFile("rhythm_pattern_", ".wav");
+            tempFile.deleteOnExit();
+            try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+                fos.write(audioBytes);
+            }
+            RhythmPatternDTO result = extractRhythmPattern(tempFile.getAbsolutePath(), silenceThresholdDb, minOnsetIntervalMs);
+            if (!tempFile.delete()) {
+                log.warn("Failed to delete temporary file: {}", tempFile.getAbsolutePath());
+            }
+            return result;
+        } catch (IOException e) {
+            log.error("Error processing audio bytes for rhythm pattern extraction", e);
+            throw new RuntimeException("Failed to extract rhythm pattern from byte array", e);
+        }
+    }
 
     /**
      * Extract a complete rhythm pattern from audio file with silence trimming

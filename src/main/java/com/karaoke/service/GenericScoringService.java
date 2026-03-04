@@ -7,6 +7,8 @@ import com.karaoke.dto.GenericScoringResponse;
 import com.karaoke.dto.RhythmPatternDTO;
 import com.karaoke.dto.RhythmScoringResultDTO;
 import com.karaoke.model.NoteEvent;
+import com.karaoke.exception.AudioDownloadException;
+import com.karaoke.util.AudioDownloader;
 import com.karaoke.util.AudioProcessor;
 import com.karaoke.util.RhythmAnalyzer;
 import com.karaoke.util.ScoringEngine;
@@ -24,6 +26,7 @@ public class GenericScoringService {
     private final AudioProcessor audioProcessor;
     private final ScoringEngine scoringEngine;
     private final RhythmAnalyzer rhythmAnalyzer;
+    private final AudioDownloader audioDownloader;
 
     public GenericScoringResponse scoreAudio(GenericScoringRequest request) {
         log.info("🎵 Processing audio: type={}", request.getChallengeType());
@@ -43,6 +46,12 @@ public class GenericScoringService {
                 default:
                     return scoreSinging(request); // Default to full scoring
             }
+        } catch (AudioDownloadException e) {
+            log.error("❌ Audio download failed: {}", e.getMessage());
+            return GenericScoringResponse.builder()
+                    .pitchScore(0.0).rhythmScore(0.0).voiceScore(0.0).overallScore(0.0)
+                    .detailedMetrics("{\"error\": \"download_failed\", \"detail\": \"" + e.getMessage() + "\"}")
+                    .build();
         } catch (Exception e) {
             log.error("❌ Scoring error: {}", e.getMessage(), e);
             return GenericScoringResponse.builder()
@@ -50,7 +59,7 @@ public class GenericScoringService {
                     .rhythmScore(0.0)
                     .voiceScore(0.0)
                     .overallScore(0.0)
-                    .detailedMetrics("{\"error\": \"" + e.getMessage() + "\"}")
+                    .detailedMetrics("{\"error\": \"processing_failed\", \"detail\": \"" + e.getMessage() + "\"}")
                     .build();
         }
     }
@@ -59,11 +68,29 @@ public class GenericScoringService {
         return scoreRhythmRepeat(request);
     }
 
+    private byte[] resolveUserAudio(GenericScoringRequest request) {
+        return audioDownloader.resolveAudio(
+                request.getUserAudioUrl(),
+                request.getUserAudioPath(),
+                "user audio"
+        );
+    }
+
+    private byte[] resolveReferenceAudio(GenericScoringRequest request) {
+        return audioDownloader.resolveAudio(
+                request.getReferenceAudioUrl(),
+                request.getReferenceAudioPath(),
+                "reference audio"
+        );
+    }
+
     private GenericScoringResponse scoreRhythmCreation(GenericScoringRequest request) {
         log.info("🥁 Scoring rhythm creation");
 
+        byte[] userAudioBytes = resolveUserAudio(request);
+
         // Extract rhythm events from user audio
-        List<Double> userOnsets = rhythmAnalyzer.extractOnsets(request.getUserAudioPath());
+        List<Double> userOnsets = rhythmAnalyzer.extractOnsets(userAudioBytes);
 
         // Analyze rhythm consistency and creativity
         double consistencyScore = rhythmAnalyzer.analyzeConsistency(
@@ -89,11 +116,14 @@ public class GenericScoringService {
         log.info("🎯 Scoring rhythm repeat with enhanced pattern matching");
 
         try {
+            byte[] userAudioBytes = resolveUserAudio(request);
+            byte[] refAudioBytes = resolveReferenceAudio(request);
+
             // Extract patterns from both audio files
             RhythmPatternDTO refPattern = rhythmAnalyzer.extractRhythmPattern(
-                    request.getReferenceAudioPath(), -40.0, 100.0);
+                    refAudioBytes, -40.0, 100.0);
             RhythmPatternDTO userPattern = rhythmAnalyzer.extractRhythmPattern(
-                    request.getUserAudioPath(), -40.0, 100.0);
+                    userAudioBytes, -40.0, 100.0);
 
             // Score using the new pattern-based algorithm
             RhythmScoringResultDTO scoringResult = rhythmAnalyzer.scoreRhythmPattern(
@@ -115,13 +145,7 @@ public class GenericScoringService {
 
         } catch (Exception e) {
             log.error("❌ Error in rhythm scoring: {}", e.getMessage(), e);
-            return GenericScoringResponse.builder()
-                    .pitchScore(0.0)
-                    .rhythmScore(0.0)
-                    .voiceScore(0.0)
-                    .overallScore(0.0)
-                    .detailedMetrics("{\"error\": \"" + e.getMessage() + "\"}")
-                    .build();
+            throw e; // Rethrow to be caught by main scoreAudio try-catch
         }
     }
 
@@ -161,13 +185,16 @@ public class GenericScoringService {
     private GenericScoringResponse scoreSoundMatch(GenericScoringRequest request) {
         log.info("🔊 Scoring sound match");
 
+        byte[] userAudioBytes = resolveUserAudio(request);
+        byte[] refAudioBytes = resolveReferenceAudio(request);
+
         // Extract note events for pitch comparison
-        List<NoteEvent> userNotes = audioProcessor.extractNoteEvents(request.getUserAudioPath());
-        List<NoteEvent> refNotes = audioProcessor.extractNoteEvents(request.getReferenceAudioPath());
+        List<NoteEvent> userNotes = audioProcessor.extractNoteEvents(userAudioBytes);
+        List<NoteEvent> refNotes = audioProcessor.extractNoteEvents(refAudioBytes);
 
         // Extract MFCCs for timbre comparison
-        List<double[]> userMFCCs = audioProcessor.extractMFCCs(request.getUserAudioPath());
-        List<double[]> refMFCCs = audioProcessor.extractMFCCs(request.getReferenceAudioPath());
+        List<double[]> userMFCCs = audioProcessor.extractMFCCs(userAudioBytes);
+        List<double[]> refMFCCs = audioProcessor.extractMFCCs(refAudioBytes);
 
         // Calculate scores
         double pitchScore = scoringEngine.calculatePitchScoreSemitones(userNotes, refNotes);
@@ -193,11 +220,14 @@ public class GenericScoringService {
     private GenericScoringResponse scoreSinging(GenericScoringRequest request) {
         log.info("🎤 Scoring singing performance");
 
+        byte[] userAudioBytes = resolveUserAudio(request);
+        byte[] refAudioBytes = resolveReferenceAudio(request);
+
         // Full karaoke scoring
-        List<NoteEvent> userNotes = audioProcessor.extractNoteEvents(request.getUserAudioPath());
-        List<NoteEvent> refNotes = audioProcessor.extractNoteEvents(request.getReferenceAudioPath());
-        List<double[]> userMFCCs = audioProcessor.extractMFCCs(request.getUserAudioPath());
-        List<double[]> refMFCCs = audioProcessor.extractMFCCs(request.getReferenceAudioPath());
+        List<NoteEvent> userNotes = audioProcessor.extractNoteEvents(userAudioBytes);
+        List<NoteEvent> refNotes = audioProcessor.extractNoteEvents(refAudioBytes);
+        List<double[]> userMFCCs = audioProcessor.extractMFCCs(userAudioBytes);
+        List<double[]> refMFCCs = audioProcessor.extractMFCCs(refAudioBytes);
 
         double pitchScore = scoringEngine.calculatePitchScoreSemitones(userNotes, refNotes);
         double rhythmScore = scoringEngine.calculateRhythmScoreOnsets(userNotes, refNotes);

@@ -25,7 +25,18 @@ public class ScoringController {
     public ResponseEntity<GenericScoringResponse> analyzeAudio(
             @RequestBody GenericScoringRequest request) {
 
-        log.info("🎵 Scoring request: type={}", request.getChallengeType());
+        // Validate at least one audio source for user audio
+        if ((request.getUserAudioUrl() == null || request.getUserAudioUrl().isBlank()) &&
+                (request.getUserAudioPath() == null || request.getUserAudioPath().isBlank())) {
+            return ResponseEntity.badRequest().body(
+                    GenericScoringResponse.builder()
+                            .overallScore(0.0)
+                            .detailedMetrics("{\"error\": \"validation_failed\", \"detail\": \"userAudioUrl or userAudioPath required\"}")
+                            .build());
+        }
+
+        log.info("🎵 Scoring request: type={}, hasUrl={}", request.getChallengeType(),
+                request.getUserAudioUrl() != null);
 
         GenericScoringResponse response = scoringService.scoreAudio(request);
 
