@@ -27,6 +27,7 @@ public class GenericScoringService {
     private final ScoringEngine scoringEngine;
     private final RhythmAnalyzer rhythmAnalyzer;
     private final AudioDownloader audioDownloader;
+    private final ToleranceTierCalculator toleranceTierCalculator;
 
     public GenericScoringResponse scoreAudio(GenericScoringRequest request) {
         log.info("🎵 Processing audio: type={}", request.getChallengeType());
@@ -113,7 +114,7 @@ public class GenericScoringService {
     }
 
     private GenericScoringResponse scoreRhythmRepeat(GenericScoringRequest request) {
-        log.info("🎯 Scoring rhythm repeat with enhanced pattern matching");
+        log.info("🎯 Scoring rhythm repeat with reaction-time tiered model");
 
         try {
             byte[] userAudioBytes = resolveUserAudio(request);
@@ -125,11 +126,15 @@ public class GenericScoringService {
             RhythmPatternDTO userPattern = rhythmAnalyzer.extractRhythmPattern(
                     userAudioBytes, -40.0, 100.0);
 
-            // Score using the new pattern-based algorithm
-            RhythmScoringResultDTO scoringResult = rhythmAnalyzer.scoreRhythmPattern(
+            // Compute tolerance tiers
+            com.karaoke.dto.ToleranceTiers tiers = toleranceTierCalculator.compute(
+                    request.getDifficulty(), request.getToleranceStrictness());
+
+            // Score using tiered model
+            RhythmScoringResultDTO scoringResult = rhythmAnalyzer.scoreRhythmPatternTiered(
                     refPattern,
                     userPattern.getOnsetTimesMs(),
-                    150.0, // tolerance
+                    tiers,
                     null);
 
             // Build detailed metrics JSON
@@ -170,11 +175,20 @@ public class GenericScoringService {
             scoring.put("overallScore", result.getOverallScore());
             scoring.put("perfectBeats", result.getPerfectBeats());
             scoring.put("goodBeats", result.getGoodBeats());
+            scoring.put("okBeats", result.getOkBeats());
             scoring.put("missedBeats", result.getMissedBeats());
+            scoring.put("scoringModel", result.getScoringModel());
             scoring.put("averageErrorMs", result.getAverageErrorMs());
             scoring.put("maxErrorMs", result.getMaxErrorMs());
             scoring.put("consistencyScore", result.getConsistencyScore());
             scoring.put("feedback", result.getFeedback());
+
+            if (result.getToleranceTiers() != null) {
+                ObjectNode tiers = scoring.putObject("toleranceTiers");
+                tiers.put("perfectMs", result.getToleranceTiers().getPerfectThresholdMs());
+                tiers.put("goodMs", result.getToleranceTiers().getGoodThresholdMs());
+                tiers.put("okMs", result.getToleranceTiers().getOkThresholdMs());
+            }
 
             return mapper.writeValueAsString(root);
         } catch (Exception e) {

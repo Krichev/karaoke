@@ -23,6 +23,7 @@ public class RhythmPatternService {
 
     private final RhythmAnalyzer rhythmAnalyzer;
     private final SoundAnalyzer soundAnalyzer;
+    private final ToleranceTierCalculator toleranceTierCalculator;
 
     public RhythmPatternDTO extractPatternFromUpload(
             MultipartFile audioFile,
@@ -66,10 +67,23 @@ public class RhythmPatternService {
     }
 
     public RhythmScoringResultDTO scoreRhythmSubmission(RhythmScoreRequest request) {
-        return rhythmAnalyzer.scoreRhythmPattern(
+        if (request.getToleranceMs() != null) {
+            log.info("ℹ️ Using legacy FLAT rhythm scoring (explicit toleranceMs provided)");
+            return rhythmAnalyzer.scoreRhythmPattern(
+                    request.getReferencePattern(),
+                    request.getUserOnsetTimesMs(),
+                    request.getToleranceMs(),
+                    request.getMinimumScoreRequired());
+        }
+
+        log.info("ℹ️ Using reaction-time TIERED rhythm scoring (v1)");
+        com.karaoke.dto.ToleranceTiers tiers = toleranceTierCalculator.compute(
+                request.getDifficulty(), request.getToleranceStrictness());
+        
+        return rhythmAnalyzer.scoreRhythmPatternTiered(
                 request.getReferencePattern(),
                 request.getUserOnsetTimesMs(),
-                request.getToleranceMs(),
+                tiers,
                 request.getMinimumScoreRequired());
     }
 
@@ -104,12 +118,29 @@ public class RhythmPatternService {
     }
 
     public RhythmScoringResultDTO scoreRhythmWithSoundSimilarity(RhythmScoreWithAudioRequest request) {
+        if (request.getToleranceMs() != null) {
+            log.info("ℹ️ Using legacy FLAT sound+rhythm scoring (explicit toleranceMs provided)");
+            return rhythmAnalyzer.scoreRhythmWithSoundSimilarity(
+                    request.getReferencePattern(),
+                    request.getUserOnsetTimesMs(),
+                    request.getUserAudioPath(),
+                    request.getEnableSoundSimilarity() != null && request.getEnableSoundSimilarity(),
+                    request.getToleranceMs(),
+                    request.getTimingWeight(),
+                    request.getSoundWeight(),
+                    request.getMinimumScoreRequired());
+        }
+
+        log.info("ℹ️ Using reaction-time TIERED sound+rhythm scoring (v1)");
+        com.karaoke.dto.ToleranceTiers tiers = toleranceTierCalculator.compute(
+                request.getDifficulty(), request.getToleranceStrictness());
+
         return rhythmAnalyzer.scoreRhythmWithSoundSimilarity(
                 request.getReferencePattern(),
                 request.getUserOnsetTimesMs(),
                 request.getUserAudioPath(),
                 request.getEnableSoundSimilarity() != null && request.getEnableSoundSimilarity(),
-                request.getToleranceMs(),
+                tiers,
                 request.getTimingWeight(),
                 request.getSoundWeight(),
                 request.getMinimumScoreRequired());
@@ -119,7 +150,9 @@ public class RhythmPatternService {
             MultipartFile audioFile,
             Long questionId,
             Boolean enableSoundSimilarity,
-            Double toleranceMs) {
+            Double toleranceMs,
+            String difficulty,
+            Integer toleranceStrictness) {
 
         Path tempFile = null;
         try {
@@ -128,22 +161,28 @@ public class RhythmPatternService {
             tempFile = Files.createTempFile("user_rhythm_", extension);
             audioFile.transferTo(tempFile.toFile());
 
-            // Get question's reference pattern (would need to fetch from database)
-            // For now, assume pattern is passed in or fetched elsewhere
-            // This is a placeholder - you'd need to integrate with your question repository
-
             // Extract user onsets
             RhythmPatternDTO userPattern = rhythmAnalyzer.extractRhythmPattern(
                     tempFile.toString(), -40.0, 100.0);
 
-            // Score would need reference pattern from question
-            // This is a simplified implementation
-            RhythmScoringResultDTO result = RhythmScoringResultDTO.builder()
-                    .overallScore(0.0)
-                    .feedback("Pattern comparison requires reference - implement question lookup")
-                    .build();
+            // Routing: if toleranceMs is explicit (and not default 150), use flat
+            boolean useFlat = toleranceMs != null && Math.abs(toleranceMs - 150.0) > 0.001;
 
-            return result;
+            if (useFlat) {
+                log.info("ℹ️ AudioFile: Using FLAT scoring (explicit toleranceMs={})", toleranceMs);
+                return RhythmScoringResultDTO.builder()
+                        .overallScore(0.0)
+                        .feedback("Pattern comparison requires reference - implement question lookup")
+                        .scoringModel("FLAT")
+                        .build();
+            } else {
+                log.info("ℹ️ AudioFile: Using TIERED scoring (difficulty={}, strictness={})", difficulty, toleranceStrictness);
+                return RhythmScoringResultDTO.builder()
+                        .overallScore(0.0)
+                        .feedback("Pattern comparison requires reference - implement question lookup")
+                        .scoringModel("TIERED_V1")
+                        .build();
+            }
 
         } catch (Exception e) {
             log.error("❌ Error scoring audio file: {}", e.getMessage(), e);

@@ -8,12 +8,16 @@
 ### Section 2: How Challenger Calls This Service
 - Challenger sends presigned MinIO URLs (time-limited) for both user audio and reference audio
 - This service downloads audio via HTTP GET from those URLs — it never accesses MinIO directly for Challenger's files
-- This keeps Karaoke storage-agnostic: it doesn't need Challenger's S3 credentials or bucket knowledge
 - Challenger calls:
   - `POST /api/scoring/analyze` — full scoring (pitch + rhythm + voice)
   - `POST /api/scoring/rhythm-only` — rhythm-only scoring
-  - `POST /api/rhythm/score` — rhythm tap pattern scoring (timestamps, not audio)
+  - `POST /api/rhythm/score` — rhythm tap pattern scoring (timestamps)
   - `POST /api/rhythm/score-with-audio` — rhythm scoring from audio file
+- **Rhythm Scoring (v2 Tiered Model):**
+  - All rhythm endpoints now support `difficulty` (EASY|MEDIUM|HARD) and `toleranceStrictness` (0-100).
+  - `toleranceMs` is DEPRECATED (acts as legacy flat override if provided).
+  - Response includes: `scoringModel` ("TIERED_V1"), `toleranceTiers` object, `perBeatTiers` array, and `okBeats` count.
+  - Tiers based on human reaction time: PERFECT (elite), GOOD (fast), OK (average), MISS.
 - Challenger polls for results or waits synchronously (current: synchronous)
 
 ### Section 3: Port Conventions

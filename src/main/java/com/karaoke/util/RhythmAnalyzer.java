@@ -6,6 +6,7 @@ import com.karaoke.dto.RhythmPatternDTO;
 import com.karaoke.dto.RhythmScoringResultDTO;
 import com.karaoke.dto.SoundComparisonDetail;
 import com.karaoke.dto.SoundFingerprint;
+import com.karaoke.dto.ToleranceTiers;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -290,7 +291,7 @@ public class RhythmAnalyzer {
     }
 
     /**
-     * Score user rhythm against reference pattern with human-calibrated tolerance
+     * Score user rhythm against reference pattern with human-calibrated tolerance (FLAT model)
      */
     public RhythmScoringResultDTO scoreRhythmPattern(
             RhythmPatternDTO referencePattern,
@@ -298,7 +299,7 @@ public class RhythmAnalyzer {
             Double customToleranceMs,
             Integer minimumScoreRequired) {
 
-        log.info("🎯 Scoring rhythm: {} ref beats, {} user beats",
+        log.info("🎯 Scoring rhythm (FLAT): {} ref beats, {} user beats",
                 referencePattern.getTotalBeats(), userOnsetTimesMs.size());
 
         List<Double> refOnsets = referencePattern.getOnsetTimesMs();
@@ -370,7 +371,7 @@ public class RhythmAnalyzer {
         double consistencyScore = calculateUserConsistency(normalizedUserOnsets, referencePattern.getIntervalsMs());
 
         // Generate feedback
-        String feedback = generateFeedback(overallScore, perfectBeats, goodBeats, missedBeats, minBeats);
+        String feedback = generateFeedback(overallScore, perfectBeats, goodBeats, 0, missedBeats, minBeats);
 
         boolean passed = minimumScoreRequired == null || overallScore >= minimumScoreRequired;
 
@@ -381,6 +382,7 @@ public class RhythmAnalyzer {
                 .absoluteErrorsMs(absoluteErrors)
                 .perfectBeats(perfectBeats)
                 .goodBeats(goodBeats)
+                .okBeats(0)
                 .missedBeats(missedBeats)
                 .averageErrorMs(Math.round(absoluteErrors.stream().mapToDouble(d -> d).average().orElse(0) * 10.0) / 10.0)
                 .maxErrorMs(absoluteErrors.stream().mapToDouble(d -> d).max().orElse(0))
@@ -388,11 +390,122 @@ public class RhythmAnalyzer {
                 .feedback(feedback)
                 .passed(passed)
                 .minimumScoreRequired(minimumScoreRequired)
+                .scoringModel("FLAT")
                 .build();
     }
 
     /**
-     * Score rhythm with optional sound similarity evaluation
+     * Score user rhythm using the reaction-time tiered model
+     */
+    public RhythmScoringResultDTO scoreRhythmPatternTiered(
+            RhythmPatternDTO referencePattern,
+            List<Double> userOnsetTimesMs,
+            ToleranceTiers tiers,
+            Integer minimumScoreRequired) {
+
+        log.info("🎯 Scoring rhythm (TIERED): {} ref beats, {} user beats, difficulty={}, strictness={}",
+                referencePattern.getTotalBeats(), userOnsetTimesMs.size(), 
+                tiers.getDifficulty(), tiers.getToleranceStrictness());
+
+        List<Double> refOnsets = referencePattern.getOnsetTimesMs();
+        int minBeats = Math.min(refOnsets.size(), userOnsetTimesMs.size());
+
+        if (minBeats < 2) {
+            return buildFailedResult("Insufficient beats to score", minimumScoreRequired);
+        }
+
+        // Normalize user onsets (first = 0)
+        double userFirstOnset = userOnsetTimesMs.get(0);
+        List<Double> normalizedUserOnsets = userOnsetTimesMs.stream()
+                .map(t -> t - userFirstOnset)
+                .collect(Collectors.toList());
+
+        List<Double> perBeatScores = new ArrayList<>();
+        List<String> perBeatTiers = new ArrayList<>();
+        List<Double> timingErrors = new ArrayList<>();
+        List<Double> absoluteErrors = new ArrayList<>();
+        int perfectCount = 0;
+        int goodCount = 0;
+        int okCount = 0;
+        int missedCount = 0;
+
+        for (int i = 0; i < minBeats; i++) {
+            double refTime = refOnsets.get(i);
+            double userTime = normalizedUserOnsets.get(i);
+            double error = userTime - refTime;
+            double absError = Math.abs(error);
+
+            timingErrors.add(error);
+            absoluteErrors.add(absError);
+
+            double beatScore;
+            com.karaoke.model.enums.ScoringTier tier = tiers.tierFor(absError);
+
+            switch (tier) {
+                case PERFECT:
+                    // Range 90-100
+                    beatScore = 100.0 - (absError / tiers.getPerfectThresholdMs() * 10.0);
+                    perfectCount++;
+                    break;
+                case GOOD:
+                    // Range 70-90
+                    beatScore = 70.0 + (1.0 - (absError - tiers.getPerfectThresholdMs()) / 
+                            (tiers.getGoodThresholdMs() - tiers.getPerfectThresholdMs())) * 20.0;
+                    goodCount++;
+                    break;
+                case OK:
+                    // Range 30-70
+                    beatScore = 30.0 + (1.0 - (absError - tiers.getGoodThresholdMs()) / 
+                            (tiers.getOkThresholdMs() - tiers.getGoodThresholdMs())) * 40.0;
+                    okCount++;
+                    break;
+                case MISS:
+                default:
+                    // Range 0-30
+                    beatScore = Math.max(0, 30.0 - (absError - tiers.getOkThresholdMs()) / 100.0 * 30.0);
+                    missedCount++;
+                    break;
+            }
+
+            perBeatScores.add(Math.round(beatScore * 10.0) / 10.0);
+            perBeatTiers.add(tier.name());
+        }
+
+        // Penalize for beat count mismatch
+        int extraBeats = Math.abs(refOnsets.size() - userOnsetTimesMs.size());
+        double beatCountPenalty = extraBeats * 5.0;
+
+        double avgBeatScore = perBeatScores.stream().mapToDouble(d -> d).average().orElse(0);
+        double overallScore = Math.max(0, avgBeatScore - beatCountPenalty);
+
+        double consistencyScore = calculateUserConsistency(normalizedUserOnsets, referencePattern.getIntervalsMs());
+        String feedback = generateFeedback(overallScore, perfectCount, goodCount, okCount, missedCount, minBeats);
+
+        boolean passed = minimumScoreRequired == null || overallScore >= minimumScoreRequired;
+
+        return RhythmScoringResultDTO.builder()
+                .overallScore(Math.round(overallScore * 10.0) / 10.0)
+                .perBeatScores(perBeatScores)
+                .perBeatTiers(perBeatTiers)
+                .timingErrorsMs(timingErrors)
+                .absoluteErrorsMs(absoluteErrors)
+                .perfectBeats(perfectCount)
+                .goodBeats(goodCount)
+                .okBeats(okCount)
+                .missedBeats(missedCount)
+                .averageErrorMs(Math.round(absoluteErrors.stream().mapToDouble(d -> d).average().orElse(0) * 10.0) / 10.0)
+                .maxErrorMs(absoluteErrors.stream().mapToDouble(d -> d).max().orElse(0))
+                .consistencyScore(consistencyScore)
+                .feedback(feedback)
+                .passed(passed)
+                .minimumScoreRequired(minimumScoreRequired)
+                .scoringModel("TIERED_V1")
+                .toleranceTiers(tiers)
+                .build();
+    }
+
+    /**
+     * Score rhythm with optional sound similarity evaluation (backward compatible flat version)
      */
     public RhythmScoringResultDTO scoreRhythmWithSoundSimilarity(
             RhythmPatternDTO referencePattern,
@@ -404,12 +517,50 @@ public class RhythmAnalyzer {
             Double customSoundWeight,
             Integer minimumScoreRequired) {
 
-        log.info("🎵 Scoring rhythm: {} ref beats, {} user beats, soundSimilarity={}",
-                referencePattern.getTotalBeats(), userOnsetTimesMs.size(), enableSoundSimilarity);
+        return scoreRhythmWithSoundSimilarityInternal(
+                referencePattern, userOnsetTimesMs, userAudioPath, enableSoundSimilarity,
+                null, customToleranceMs, customTimingWeight, customSoundWeight, minimumScoreRequired);
+    }
 
-        // Get timing-only score first
-        RhythmScoringResultDTO result = scoreRhythmPattern(
-                referencePattern, userOnsetTimesMs, customToleranceMs, minimumScoreRequired);
+    /**
+     * Score rhythm with optional sound similarity evaluation (tiered version)
+     */
+    public RhythmScoringResultDTO scoreRhythmWithSoundSimilarity(
+            RhythmPatternDTO referencePattern,
+            List<Double> userOnsetTimesMs,
+            String userAudioPath,
+            boolean enableSoundSimilarity,
+            ToleranceTiers tiers,
+            Double customTimingWeight,
+            Double customSoundWeight,
+            Integer minimumScoreRequired) {
+
+        return scoreRhythmWithSoundSimilarityInternal(
+                referencePattern, userOnsetTimesMs, userAudioPath, enableSoundSimilarity,
+                tiers, null, customTimingWeight, customSoundWeight, minimumScoreRequired);
+    }
+
+    private RhythmScoringResultDTO scoreRhythmWithSoundSimilarityInternal(
+            RhythmPatternDTO referencePattern,
+            List<Double> userOnsetTimesMs,
+            String userAudioPath,
+            boolean enableSoundSimilarity,
+            ToleranceTiers tiers,
+            Double customToleranceMs,
+            Double customTimingWeight,
+            Double customSoundWeight,
+            Integer minimumScoreRequired) {
+
+        log.info("🎵 Scoring rhythm with sound: {} ref beats, {} user beats, tiered={}",
+                referencePattern.getTotalBeats(), userOnsetTimesMs.size(), tiers != null);
+
+        // Get timing-only score
+        RhythmScoringResultDTO result;
+        if (tiers != null) {
+            result = scoreRhythmPatternTiered(referencePattern, userOnsetTimesMs, tiers, minimumScoreRequired);
+        } else {
+            result = scoreRhythmPattern(referencePattern, userOnsetTimesMs, customToleranceMs, minimumScoreRequired);
+        }
 
         // Apply weights
         double timingWeight = customTimingWeight != null ? customTimingWeight :
@@ -553,7 +704,7 @@ public class RhythmAnalyzer {
         return "4/4";
     }
 
-    private String generateFeedback(double score, int perfect, int good, int missed, int total) {
+    private String generateFeedback(double score, int perfect, int good, int ok, int missed, int total) {
         if (score >= 90) return "🎉 Perfect rhythm! Outstanding timing!";
         if (score >= 75) return "👏 Great rhythm! Very good timing.";
         if (score >= 60) return "👍 Good effort! Keep practicing the timing.";

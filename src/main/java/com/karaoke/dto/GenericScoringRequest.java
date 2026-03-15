@@ -17,4 +17,6 @@ public class GenericScoringRequest {
     private String challengeType; // RHYTHM_CREATION, RHYTHM_REPEAT, SOUND_MATCH, SINGING
     private Integer rhythmBpm;
     private String timeSignature;
+    private String difficulty;
+    private Integer toleranceStrictness;
 }

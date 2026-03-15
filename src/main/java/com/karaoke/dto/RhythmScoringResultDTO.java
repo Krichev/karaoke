@@ -24,14 +24,26 @@ public class RhythmScoringResultDTO {
     /** Absolute timing errors */
     private List<Double> absoluteErrorsMs;
     
-    /** Number of beats with < 50ms error */
+    /** Number of beats with < 50ms error (legacy) or PERFECT tier (tiered) */
     private Integer perfectBeats;
     
-    /** Number of beats with 50-150ms error */
+    /** Number of beats with 50-150ms error (legacy) or GOOD tier (tiered) */
     private Integer goodBeats;
+
+    /** Number of beats in OK tier (tiered only) */
+    private Integer okBeats;
     
     /** Number of beats with > interval/2 error (missed) */
     private Integer missedBeats;
+
+    /** Tier labels for each beat ("PERFECT", "GOOD", "OK", "MISS") */
+    private List<String> perBeatTiers;
+
+    /** The scoring model used: "TIERED_V1" or "FLAT" */
+    private String scoringModel;
+
+    /** The calculated tolerance tiers (null if FLAT model) */
+    private ToleranceTiers toleranceTiers;
     
     /** Average timing error across all beats */
     private Double averageErrorMs;

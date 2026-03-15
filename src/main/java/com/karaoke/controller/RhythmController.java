@@ -89,12 +89,15 @@ public class RhythmController {
             @RequestParam("audioFile") MultipartFile audioFile,
             @RequestParam("questionId") Long questionId,
             @RequestParam(value = "enableSoundSimilarity", required = false, defaultValue = "false") Boolean enableSoundSimilarity,
-            @RequestParam(value = "toleranceMs", required = false, defaultValue = "150") Double toleranceMs) {
+            @RequestParam(value = "toleranceMs", required = false, defaultValue = "150") Double toleranceMs,
+            @RequestParam(value = "difficulty", required = false, defaultValue = "MEDIUM") String difficulty,
+            @RequestParam(value = "toleranceStrictness", required = false, defaultValue = "60") Integer toleranceStrictness) {
 
-        log.info("🎵 Scoring audio file for question {}", questionId);
+        log.info("🎵 Scoring audio file for question {} (difficulty={}, strictness={})", 
+                questionId, difficulty, toleranceStrictness);
 
         RhythmScoringResultDTO result = rhythmPatternService.scoreAudioFile(
-                audioFile, questionId, enableSoundSimilarity, toleranceMs);
+                audioFile, questionId, enableSoundSimilarity, toleranceMs, difficulty, toleranceStrictness);
 
         return ResponseEntity.ok(result);
     }
@@ -103,7 +106,9 @@ public class RhythmController {
     public static class RhythmScoreRequest {
         private RhythmPatternDTO referencePattern;
         private List<Double> userOnsetTimesMs;
-        private Double toleranceMs;
+        private Double toleranceMs; // Deprecated flat override
+        private String difficulty;
+        private Integer toleranceStrictness;
         private Integer minimumScoreRequired;
     }
 
@@ -113,7 +118,9 @@ public class RhythmController {
         private List<Double> userOnsetTimesMs;
         private String userAudioPath;
         private Boolean enableSoundSimilarity;
-        private Double toleranceMs;
+        private Double toleranceMs; // Deprecated flat override
+        private String difficulty;
+        private Integer toleranceStrictness;
         private Double timingWeight;
         private Double soundWeight;
         private Integer minimumScoreRequired;
